@@ -2,54 +2,6 @@ from SORB_agent import *
 from tqdm import tqdm
 import re
 
-
-def cumulative_plotter(path: str, batches: list, env_file: str, label: str, fig_shape: list, norm_rep: bool) -> None:
-    pass
-    # TODO plotterEnv
-    # dTm = PlotterEnv(env_file, False, with_replay=False, win_size=100, path=f'{path}{batches[0]}/', norm_rep=norm_rep)
-    # regex = re.compile('agent.*csv')
-    # for batch in batches:
-    #     curr_path = f'{path}{batch}/'
-    #     print(f'Batch {batch}...')
-    #     for root, subdirs, files in os.walk(curr_path):
-    #         for file in tqdm(files):
-    #             if regex.match(file):
-    #                 dTm.load_events(file, batch, path=curr_path)
-    # print('Plotting...')
-    # dTm.plot_reward_rates(batches, save_img=True, path='./img', label=label)
-    # plt.pause(5)
-    # plt.close()
-    # dTm.plot_replay('loc', batches, fig_shape, save_img=True, path='./img', label=label)
-    # plt.pause(5)
-    # plt.close()
-    # dTm.plot_replay('content', batches, fig_shape, save_img=True, path='./img', label=label)
-    # plt.pause(5)
-    # plt.close()
-
-
-def matrix_plotter(path: str, axes: list, axes_to_plot: list, batches: list, env_file: str, **kwargs) -> None:
-    pass
-    # TODO plotterEnv
-    # win_begin = kwargs.get('win_begin', 0)
-    # win_end = kwargs.get('win_end', None)
-    # dTm = PlotterEnv(env_file, False, with_replay=False, win_size=100, path=f'{path}{batches[0]}/', params=axes,
-    #                  win_begin=win_begin, win_end=win_end)
-    # regex = re.compile('agent.*csv')
-    # for batch in batches:
-    #     curr_path = f'{path}{batch}/'
-    #     print(f'Batch {batch}...')
-    #     for root, subdirs, files in os.walk(curr_path):
-    #         for file in tqdm(files):
-    #             if regex.match(file):
-    #                 dTm.load_events(file, batch, path=curr_path)
-    # print('Plotting...')
-    # label = kwargs.get('label', '')
-    # methods = kwargs.get('methods', 'max')
-    # for ax in axes_to_plot:
-    #     for meth in methods:
-    #         dTm.plot_cumul_rew_matrix(ax, save_img=True, path='./img', label=label, method=meth)
-
-
 def experiment_plotter(path: str, env_file: str, agent_file: str, **kwargs):
     """
     Plots the data gathered from a specific experiment
@@ -60,11 +12,9 @@ def experiment_plotter(path: str, env_file: str, agent_file: str, **kwargs):
         weights: weights to combine the Q, Ur and Ut values into C-values [np.ndarray]
     :return:
     """
-    weights = kwargs.get('weights', np.array([1, 0, 0]))
-    gamma = 0.9
     dTm = PlotterEnv(env_file, path=path)
     dTm.load_events(agent_file, 'MB', path=path)
-    dTm.plot_events(weights=weights, gamma=gamma)
+    dTm.plot_events()
 
 
 def complex_experiment(save_path: str, tag: str, dec_weights, **kwargs) -> None:
@@ -108,7 +58,7 @@ def complex_experiment(save_path: str, tag: str, dec_weights, **kwargs) -> None:
     params['new_rew_val'] = new_rew_val  # ------------------ What is (are) the value(s) of the reward(s)
     params['new_rew_prob'] = np.ones(new_rew_loc.shape)  # -- What is (area) the probability/ies of the reward(s)
     params['start_pos'] = 21  # ----------------------------- What state do we start from
-    params['env_forbidden_walls'] = True  # ----------------- Is it forbidden to bump into walls?
+    params['env_forbidden_walls'] = False  # ----------------- Is it forbidden to bump into walls?
     params['restricted_dT'] = False  # ---------------------- Is the movement restricted to unidirectional?
     params['slip_prob'] = 0  # ------------------------------ The probability of slipping after a step
 
@@ -141,7 +91,7 @@ def complex_experiment(save_path: str, tag: str, dec_weights, **kwargs) -> None:
     params['max_replay'] = max_replay  # ---------------------------- Max replay steps per replay event
     params['add_predecessors'] = add_predecessors  # -------- When do I add state predecessors (None, act, rep or both)
     params[
-        'replay_forbidden_walls'] = True  # ----------------- If we replay (simulate), is bumping into a wall forbidden?
+        'replay_forbidden_walls'] = False  # ----------------- If we replay (simulate), is bumping into a wall forbidden?
     params['dec_weights'] = dec_weights  # ------------------ The weights used for decision-making [Q, Ur, Ut] float
     params['rep_weigths'] = rep_weights  # ------------------ The weights used for replay [Q, Ur, Ut] float
 

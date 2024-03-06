@@ -604,7 +604,6 @@ class RLagent:
 
                 # 4) We learn
                 delta_C = self.inference(curr_s, a, s_prime, rew, virtual=True, update_buffer=False)
-                self._maxval = np.amax(self.__amax_C__(), axis=0)  # To make it adaptive
                 # We don't update the buffer, as the path we're taking is completely imaginary
 
                 # 5) And we consider one step to be done
@@ -685,6 +684,7 @@ class RLagent:
                 event[f'Q_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 0]]
                 event[f'Ur_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 1]]
                 event[f'Ut_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 2]]
+                event[f'C_{s}_{a_idx}'] = [self.__combine_C__(s=s, a=a_idx)]
 
         # 3) Add it to the table
         events_temp = pd.DataFrame.from_dict(event).fillna(value=np.nan)
@@ -822,6 +822,13 @@ class RLagent:
             delta_C = self.__value_iteration__(s, a)
         elif self._model_type == "PI":
             delta_C = self.__policy_iteration__(s, a)
+        # TODO: 2 questions. 1, I update the maxvals here, after having computed the delta C. Is that a problem?
+        #  Should I do it before? Delta C consists of the prior and posterior estimates of the C values, so should I
+        #  normalize them the same or differently? 2, if I keep the current maximum of the U values as maxval, then
+        #  small uncertainties will slowly become more and more important as they scale up. However, if I keep the
+        #  historical maximum, then, for the normal Q values, what happens if the reward decreases?
+        self._maxval = np.maximum(self._maxval, np.amax(self.__amax_C__(), axis=0))
+        self._maxval[self._maxval == 0] = 1  # It's only used for normalization
 
         # 4) Store if needed
         if update_buffer:
@@ -988,6 +995,7 @@ class RLagent:
                                 self._events[f'Q_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
                                 self._events[f'Ur_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
                                 self._events[f'Ut_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
+                                self._events[f'C_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
 
             except AttributeError:  # There is no such thing as _events
                 poss_states = range(self._nS)
@@ -998,8 +1006,9 @@ class RLagent:
                 Q_names = [f'Q_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
                 Ur_names = [f'Ur_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
                 Ut_names = [f'Ut_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
+                C_names = [f'C_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
                 self._events = pd.DataFrame(columns=['iter', 'step', 's', 'u', 's_prime', 'r', 'hr', 'ht', 'deltaC',
-                                                     *Q_names, *Ur_names, *Ut_names])
+                                                     *Q_names, *Ur_names, *Ut_names, *C_names])
             if not self._save_agent:
                 self._save_agent = True
                 self.__save_step__(True)  # If we just turned it on, we take a snapshot of the agent's current state

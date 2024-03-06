@@ -536,241 +536,6 @@ class PlotterEnv(Env):
         self.load_env(file_name, path=path)
         return
 
-    # Internal methods of the data aggreagtor
-    def __count_replay__(self, batch: str) -> None:
-        """
-        Counts the replay events (stoppings) and the replayed states and stores them
-        :param batch: the name of the batch of data we're working on
-        :return:
-        """
-        # First extend the current memory
-        if batch not in self._stopped_at:
-            # If it's a new batch, then let's just add a corresponding array
-            self._replayed[batch] = np.zeros((self._maze.shape[0], self._maze.shape[1], 1))
-            self._stopped_at[batch] = np.zeros((self._maze.shape[0], self._maze.shape[1], 1))
-        else:
-            # If it is a pre-existing batch, let's simply extend it
-            self._replayed[batch] = np.append(self._replayed[batch],
-                                              np.zeros((self._maze.shape[0], self._maze.shape[1], 1)),
-                                              axis=2)
-            self._stopped_at[batch] = np.append(self._stopped_at[batch],
-                                                np.zeros((self._maze.shape[0], self._maze.shape[1], 1)),
-                                                axis=2)
-
-        # Loop through the whole table
-        for row_idx in range(len(self._agent_events)):
-            if self._agent_events['step'].iloc[row_idx] > 0:  # If we have a replay event
-                # We update the replayed states
-                x, y = self.__find_state_coord__(row_idx, 's')
-                self._replayed[batch][x, y, -1] += 1
-                x, y = self.__find_state_coord__(row_idx, 's_prime')
-                self._replayed[batch][x, y, -1] += 1
-
-                if self._agent_events['step'].iloc[row_idx] == 1:  # And if this is really the first replay step
-                    # We update stopping
-                    x, y = self.__find_state_coord__(row_idx - 1, 's_prime')
-                    self._stopped_at[batch][x, y, -1] += 1
-
-        # Finally we normalize
-        if self._norm_rep:
-            sum_of_steps = (self._agent_events['step'] > 0).to_numpy().sum()
-            sum_of_replay = (self._agent_events['step'] == 1).to_numpy().sum()
-            if sum_of_steps > 0:
-                self._replayed[batch][:, :, -1] /= sum_of_steps
-            if sum_of_replay > 0:
-                self._stopped_at[batch][:, :, -1] /= sum_of_replay
-        return
-
-    def __epoch_based_rate_computer__(self, data: dict, batch: str, agent_events: pd.core.frame.DataFrame,
-                                      **kwargs) -> None:
-        """
-        Computes the reward or the replay rates in an epoch-based fashion. The core of the computation is
-        (reward or replay number)/(number of steps in the epoch)
-        :param data: either the self._rew_rate or the self._replay_rate
-        :param batch: what batch we are working on
-        :param agent_events: a dataframe with steps, iterations, rewards and replay
-        :param kwargs:
-            rate: if 'reward' (default) we compute reward rates. If 'replay' we compute replay rates
-        :return:
-        """
-        rate = kwargs.get('rate', 'r')
-        if rate == 'reward':
-            rate = 'r'
-        elif rate not in ['reward', 'r', 'replay']:
-            raise ValueError('We can either compute reward or replay rates.')
-        if rate == 'replay' and self._with_replay:
-            raise ValueError('We cannot compute replay rates if replay is included in the time axis.')
-
-        # If we consider epochs, then the reward rates is a fixed length vector
-        # 1) Let's see if we have the requested batch
-        if batch not in data:
-            # If it's a new batch, then let's just add a corresponding array
-            data[batch] = np.zeros((int((agent_events['r'] > 0).sum()), 1))
-        else:
-            # If it is a pre-existing batch, let's simply extend it
-            data[batch] = np.append(data[batch], np.zeros((int((agent_events['r'] > 0).sum()), 1)),
-                                    axis=1)
-
-        # 2) Loop through the dataframe and count the steps between 2 rewards
-        epoch_idx = 0
-        last_rew_idx = 0
-        for rew_idx in range(len(agent_events)):
-            if agent_events['r'].iloc[rew_idx] > 0:
-                # If we find the reward, we save r/(steps it took to get it) for the reward rate
-                # And the (sum of all replays)/(steps we took) for the replay rate
-                data[batch][epoch_idx, -1] = agent_events.loc[last_rew_idx:rew_idx, rate].sum() / \
-                                             (rew_idx - last_rew_idx)
-                last_rew_idx = rew_idx
-                epoch_idx += 1
-
-    def __step_based_rate_computer__(self, data: dict, batch: str, agent_events: pd.core.frame.DataFrame,
-                                     **kwargs) -> None:
-        """
-        Computes the reward or the replay rates in a step-based fashion. The core of the computation is
-        a convolution over the reward or replay rate with a predefined smoothing window
-        :param data: either the self._rew_rate or the self._replay_rate
-        :param batch: what batch we are working on
-        :param agent_events: a dataframe with steps, iterations, rewards and replay
-        :param kwargs:
-            rate: if 'reward' (default) we compute reward rates. If 'replay' we compute replay rates
-        :return:
-        """
-        rate = kwargs.get('rate', 'r')
-        if rate == 'reward':
-            rate = 'r'
-        elif rate not in ['reward', 'r', 'replay']:
-            raise ValueError('We can either compute reward or replay rates.')
-        if rate == 'replay' and self._with_replay:
-            raise ValueError('We cannot compute replay rates if replay is included in the time axis.')
-
-        # If it is not measured in epochs, then we do a convolution
-        conv_win = np.ones(self._win_size) * 1 / self._win_size
-
-        # 1) We compute the convolved reward rate.
-        # We will pad the rewards on the left, but not on the right!
-        og_rate = np.append(np.zeros(math.floor(self._win_size / 2)), agent_events[rate].to_numpy())
-        smooth_rate = np.convolve(og_rate, conv_win, mode='valid')
-
-        # 2) Let's see if we have the requested batch
-        if batch not in data:
-            # If it's a new batch, then let's just add a corresponding array
-            data[batch] = np.reshape(smooth_rate, (len(smooth_rate), 1))
-        else:
-            # If it is a pre-existing batch, we might need to pad it or the old ones on the right
-            if data[batch].shape[0] > len(smooth_rate):
-                smooth_rate = np.append(smooth_rate, smooth_rate[-1] * np.ones(data[batch].shape[0] - len(smooth_rate)))
-            elif data[batch].shape[0] < len(smooth_rate):
-                extension = np.repeat(data[batch][[-1], :], len(smooth_rate) - data[batch].shape[0], axis=0)
-                data[batch] = np.append(data[batch], extension, axis=0)
-
-            # And then we add it to the end
-            data[batch] = np.append(data[batch], np.reshape(smooth_rate, (smooth_rate.shape[0], 1)), axis=1)
-
-    def __compute_reward_rate__(self, batch: str) -> None:
-        """
-        Computes the reward rates and replay rates (if not with_replay) for the current agent data and stores it
-        :param batch: The name of the batch of data we're working on
-        :return:
-        """
-        # If replay is considered we work on the full dataframe, otherwise it's only the real steps
-        # We only consider from step 1 as step 0 contains the initial state (and NaNs)
-        agent_events = self._agent_events.loc[1:, ['iter', 'step', 'r']]
-        if not self._with_replay:  # Let's count the replay steps
-            agent_events['replay'] = -1 * agent_events['step'].diff()  # The number of replay steps *before* a given s
-            agent_events = agent_events[agent_events['step'] == 0]
-            agent_events['replay'] = agent_events['replay'].shift(-1)  # Now it's *after* a given s
-            agent_events['replay'] = agent_events['replay'].fillna(0)  # Bc of the NaN after the last step
-        # It's important to only count real rewards, thus we remove virtual ones
-        agent_events.loc[agent_events['step'] > 0, 'r'] = 0
-
-        if self._use_epochs:
-            self.__epoch_based_rate_computer__(self._rew_rate, batch, agent_events)
-            if not self._with_replay:
-                self.__epoch_based_rate_computer__(self._replay_rate, batch, agent_events, rate='replay')
-
-        else:
-            # If it is not measured in epochs, then we do a convolution
-            self.__step_based_rate_computer__(self._rew_rate, batch, agent_events)
-            if not self._with_replay:
-                self.__step_based_rate_computer__(self._replay_rate, batch, agent_events, rate='replay')
-        return
-
-    def __compute_cumul_rew__(self, batch: str) -> None:
-        """
-        Computes the cumulative rewards for the current agent data within the previously specified window and stores it
-        :param batch: The name of the batch of data we're working on
-        :return:
-        """
-        try:
-            # 0) Extracting the batch information from the batch name
-            curr_row = pd.DataFrame([[None] * len(self._cumul_rew.columns)], columns=self._cumul_rew.columns)
-            for col_name in self._cumul_rew.columns:
-                if col_name == 'cumul_rew':
-                    continue
-                # Now we want to find the col_name in the batch name. There are 2 possible formats: name_strvalue, or
-                # nameNumvalue. Normally this is preceeded by an underscore (_name_val or _nameVal), except at the very
-                # beginning of the batch name. val_idx will be the index where the value begins
-                # 0.a) let's see if _name_val exists
-                val_idx = batch.find(f'_{col_name}_') + len(col_name) + 2  # Idx where the variable value begins
-                if val_idx - len(col_name) - 2 == -1:
-                    # 0.b) If it doesn't, that means that the value might be numeric, so we should retry with _nameVal
-                    res = re.search('_' + col_name + r'\d', batch)
-                    if res is not None:
-                        val_idx = res.start() + len(col_name) + 1
-                    else:
-                        # 0.c) If we still haven't found it that means the name_val/nameVal is at the beginning of the
-                        # batch name. Let's see if we can find it as name_val
-                        val_idx = batch.find(f'{col_name}_')
-                        if val_idx == 0:
-                            # If it is at the very beginning of the batch name, we're good
-                            val_idx = len(col_name) + 1
-                        else:
-                            # 0.d) If it isn't, then nameVal has to be at the beginning of the file name
-                            val_idx = len(col_name)
-
-                # Now we can find the end index of the value using the start index
-                val_end = batch[val_idx:].find('_')
-                if val_end == -1:
-                    curr_row[col_name].iloc[0] = batch[val_idx:]
-                else:
-                    curr_row[col_name].iloc[0] = batch[val_idx:val_idx + val_end]
-
-            # 1) Preparing the tab;e to use, including the index by which we'll cut it up
-            agent_events = self._agent_events.loc[1:, ['iter', 'step', 'r']]
-            agent_events.loc[agent_events['step'] > 0, 'r'] = 0
-            if not self._use_epochs:
-                # If we're using steps we have to cut the table in a fashion that we take everything within the
-                # specified window
-                agent_events['idx'] = agent_events['iter']  # We will select based on the simple iter field of the table
-            else:
-                # If we're epoch based, we need to compute the epoch index, and cut the dataframe based on that
-                agent_events['idx'] = (agent_events['r'] > 0).cumsum()  # We will select based on the epoch index
-
-            # 2) Preparing the indices of the cuts whether or not they are epoch or step based
-            win_begin = self._win_begin  # Win begin can be positive or negative integer
-            if win_begin < 0:
-                win_begin = agent_events['idx'].iloc[-1] + win_begin
-            elif not self._use_epochs:
-                # Since agent_events starts from index 1!
-                win_begin += 1
-            win_end = self._win_end  # Win end can be None (till the end) positive (iter num) or negative (end-iter num)
-            if win_end is None:
-                win_end = agent_events['idx'].iloc[-1]
-            elif win_end < 0:
-                win_end = agent_events['idx'].iloc[-1] + win_end
-            elif not self._use_epochs:
-                # Since agent_events starts from index 1!
-                win_end += 1
-            agent_events = agent_events.loc[(agent_events['idx'] >= win_begin) & (agent_events['iter'] < win_end), :]
-
-            # 3) Computing and storing the sum reward
-            curr_row['cumul_rew'] = agent_events['r'].sum()
-            self._cumul_rew = pd.concat([self._cumul_rew, curr_row], axis=0)
-            return
-
-        except AttributeError:
-            return
-
     # Internal methods of the plotter
     def __find_state_coord__(self, row_idx: int, col_name: str) -> Tuple[int, int]:
         """
@@ -829,39 +594,6 @@ class PlotterEnv(Env):
         curr_image[x, y] = max_val + 2
         return curr_image
 
-    def __rate_plotter__(self, data: dict, batches: list, ax) -> None:
-        """
-        Plots the reward or replay rates on a given axis.
-        :param data: self._rew_rate or self._replay_rate
-        :param batches: the list of batches to plot
-        :param ax: the axis on which we are working
-        :return:
-        """
-        rr = data[batches[0]]
-        for batch_idx in range(1, len(batches)):
-            # Between the different conditions the length of the time axis might differ given that we might replay
-            # differently. Thus, the longest time axis needs to be found and the rest needs to be padded
-            rr_curr = data[batches[batch_idx]]
-            if rr.shape[0] > rr_curr.shape[0]:
-                extension = np.repeat(rr_curr[[-1], :], rr.shape[0] - rr_curr.shape[0], axis=0)
-                rr_curr = np.append(rr_curr, extension, axis=0)
-            elif rr.shape[0] < rr_curr.shape[0]:
-                extension = np.repeat(rr[[-1], :], rr_curr.shape[0] - rr.shape[0], axis=0)
-                rr = np.append(rr, extension, axis=0)
-            rr = np.append(rr, rr_curr, axis=1)
-        t = range(rr.shape[0])
-        header = pd.MultiIndex.from_product([batches, [f'{idx}' for idx in range(data[batches[0]].shape[1])]],
-                                            names=['batch', 'run'])
-        df = pd.DataFrame(rr, index=t, columns=header)
-        x_name = 'steps'
-        if self._use_epochs:
-            x_name = 'epochs'
-        df[x_name] = t
-
-        # Plotting
-        df = pd.melt(df, id_vars=x_name)
-        sns.lineplot(df, x=x_name, y='value', hue='batch', ax=ax)
-
     # Function to handle the data
     def load_events(self, file_name: str, batch: str, **kwargs):
         """
@@ -886,26 +618,18 @@ class PlotterEnv(Env):
         else:
             raise FileNotFoundError(f'No file named {file_name}')
 
-        # And then we immediately perform some basic data aggregation
-        self.__count_replay__(batch)
-        if self._use_epochs is not None:
-            self.__compute_reward_rate__(batch)
-            self.__compute_cumul_rew__(batch)
         return
 
     # Plotters
-    def plot_events(self, **kwargs):
+    def plot_events(self):
         """
         Plots the events of the experiment in an animated fashion. It uses 2 distinct plots: one for the maze, the
         replay and the Q values, the other one for the Ur and the Ut values.
-        :param kwargs:
-            weights: [wQ, wUr, wUt], the weights of the different components of the C-value
-            gamma: the discounting factor (needed to compute Qmax for the normalization)
         :return:
         """
         # 0) Preparing the dataframes -- we need the max Q value for each state, and (as of now) the mean H value
         Q_vals = pd.DataFrame()
-        Ur_vals, Ut_vals = pd.DataFrame(), pd.DataFrame()
+        Ur_vals, Ut_vals, C_vals = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         empty_arr = np.empty(self._agent_events.shape[0])
         empty_arr[:] = np.nan
         for s_idx in range(self.state_num()):
@@ -931,24 +655,17 @@ class PlotterEnv(Env):
                 Ut_vals[f'Ut_{s_idx}'] = pd.DataFrame(empty_arr,
                                                       columns=[f'Ut_{s_idx}'])
 
-        weights = kwargs.get('weights', np.array([1, 0, 0]))
-        if np.sum(weights) < 1 - np.finfo(np.float32).eps or 1 + np.finfo(np.float32).eps < np.sum(weights):
-            raise ValueError('The weights of the different quality values must sum up to 1.')
-        max_vals = np.array([np.nanmax(Q_vals.to_numpy()),
-                             np.nanmax(Ur_vals.to_numpy()),
-                             np.nanmax(Ut_vals.to_numpy())])
-        gamma = kwargs.get('gamma', None)
-        if gamma is not None:
-            # max_vals = np.array([max(self.max_rew(iter=0) / (1 - gamma),
-            #                          Q_vals.iloc[0].to_numpy().max()),  # Qmax
-            #                      max(RLA.entropy(np.ones(2) / 2) / (1 - gamma),
-            #                          Ur_vals.iloc[0].to_numpy().max()),  # Ur max
-            #                      max(RLA.entropy(np.ones(self.state_num()) / self.state_num()) / (1 - gamma),
-            #                          Ut_vals.iloc[0].to_numpy().max())])  # Ut max
-            max_vals = np.array([np.nanmax(Q_vals.iloc[0].to_numpy()),  # Qmax
-                                 np.nanmax(Ur_vals.iloc[0].to_numpy()),  # Ur max
-                                 np.nanmax(Ut_vals.iloc[0].to_numpy())])  # Ut max
-            max_vals[max_vals == 0] = 1
+            if f'C_{s_idx}_0' in self._agent_events.columns:
+                cols = [f'C_{s_idx}_{a_idx}' for a_idx in self.possible_moves(s_idx)]
+                C_vals[f'C_{s_idx}'] = self._agent_events[cols].max(axis=1)
+            else:
+                C_vals[f'C_{s_idx}'] = pd.DataFrame(empty_arr,
+                                                    columns=[f'C_{s_idx}'])
+
+        max_vals = np.array([np.nanmax(Q_vals.iloc[0].to_numpy()),  # Qmax
+                             np.nanmax(Ur_vals.iloc[0].to_numpy()),  # Ur max
+                             np.nanmax(Ut_vals.iloc[0].to_numpy())])  # Ut max
+        max_vals[max_vals == 0] = 1
 
         # 1) Preparing the Q plots and the H plots
         plt.ion()
@@ -958,11 +675,7 @@ class PlotterEnv(Env):
         ax_env[2].set_title("C values")
         curr_maze = self.__status_to_image__(0)
         curr_replay = np.zeros(self._maze.shape)
-        curr_C_df = pd.DataFrame(np.reshape(Q_vals.iloc[0].to_numpy() / max_vals[0] * weights[0] +
-                                            Ur_vals.iloc[0].to_numpy() / max_vals[1] * weights[1] +
-                                            Ut_vals.iloc[0].to_numpy() / max_vals[2] * weights[2],
-                                            (1, self.state_num())))
-        curr_C = self.__event_to_img__(curr_C_df.iloc[0])
+        curr_C = self.__event_to_img__(C_vals.iloc[0])
         axim_env = np.array([ax_env[0].imshow(curr_maze),
                              ax_env[1].imshow(curr_replay),
                              ax_env[2].imshow(curr_C, vmin=0, vmax=1)])
@@ -1016,23 +729,11 @@ class PlotterEnv(Env):
             curr_Q = self.__event_to_img__(Q_vals.iloc[row_idx])
             curr_Ur = self.__event_to_img__(Ur_vals.iloc[row_idx])
             curr_Ut = self.__event_to_img__(Ut_vals.iloc[row_idx])
-            if gamma is not None:
-                # max_vals = np.array([max(self.max_rew(iter=it) / (1 - gamma),
-                #                          Q_vals.iloc[row_idx].to_numpy().max()),  # Qmax
-                #                      max(RLA.entropy(np.ones(2) / 2) / (1 - gamma),
-                #                          Ur_vals.iloc[row_idx].to_numpy().max()),  # Ur max
-                #                      max(RLA.entropy(np.ones(self.state_num()) / self.state_num()) / (1 - gamma),
-                #                          Ut_vals.iloc[row_idx].to_numpy().max())])  # Ut max
-                max_vals = np.array([np.nanmax(Q_vals.iloc[row_idx].to_numpy()),  # Qmax
-                                     np.nanmax(Ur_vals.iloc[row_idx].to_numpy()),  # Ur max
-                                     np.nanmax(Ut_vals.iloc[row_idx].to_numpy())])  # Ut max
-                max_vals[max_vals == 0] = 1
-            curr_C_df = pd.DataFrame(
-                np.reshape(Q_vals.iloc[row_idx].to_numpy() / max_vals[0] * weights[0] +
-                           Ur_vals.iloc[row_idx].to_numpy() / max_vals[1] * weights[1] +
-                           Ut_vals.iloc[row_idx].to_numpy() / max_vals[2] * weights[2],
-                           (1, self.state_num())))
-            curr_C = self.__event_to_img__(curr_C_df.iloc[0])
+            max_vals = np.array([np.nanmax(Q_vals.iloc[row_idx].to_numpy()),  # Qmax
+                                 np.nanmax(Ur_vals.iloc[row_idx].to_numpy()),  # Ur max
+                                 np.nanmax(Ut_vals.iloc[row_idx].to_numpy())])  # Ut max
+            max_vals[max_vals == 0] = 1
+            curr_C = self.__event_to_img__(C_vals.iloc[row_idx])
 
             # 2.c) Refresh txt
             for idx_x in range(txt.shape[0]):
@@ -1059,206 +760,3 @@ class PlotterEnv(Env):
             fig_env.canvas.flush_events()
             fig_rla.canvas.flush_events()
             # plt.pause(.001)
-
-    def plot_reward_rates(self, batches: list, **kwargs) -> None:
-        """
-        Plots the reward rates over the steps or over the epochs. If replay steps are not considered in the x axis, a
-        replay-rate subplot is also produced.
-        :param batches: a list of the names of the batches we want to compare
-        :param kwargs:
-            save_img: do I want to save the output fig
-            path: if save_img, where do I want to save (default: ./)
-            label: if save_img, what tag should I attach to the figure name
-        :return:
-        """
-        if self._use_epochs is None:
-            raise ValueError(
-                'Cannot compute reward rates without knowing if the experiment is epoch or step based.')
-        if self._with_replay:
-            fig, axes = plt.subplots(1, 1, figsize=(15, 4))
-            axes = np.array([axes])
-        else:
-            fig, axes = plt.subplots(2, 1, figsize=(15, 9))
-            axes[1].set_title('Replay rates')
-        axes[0].set_title('Reward rates')
-        if self._use_epochs:
-            axes[0].set_xlabel('Epochs')
-            axes[0].set_ylabel(f'Reward / steps in epoch')
-            if not self._with_replay:
-                axes[1].set_xlabel('Epochs')
-                axes[1].set_ylabel(f'Replay steps / real steps in epoch')
-        else:
-            axes[0].set_xlabel('Steps')
-            axes[0].set_ylabel(f'Reward / {self._win_size} steps')
-            if not self._with_replay:
-                axes[1].set_xlabel('Steps')
-                axes[1].set_ylabel(f'Replay steps / {self._win_size} real steps')
-
-        # Creating a dataframe for seaborn to work with
-        self.__rate_plotter__(self._rew_rate, batches, axes[0])
-        if not self._with_replay:
-            self.__rate_plotter__(self._replay_rate, batches, axes[1])
-
-        plt.show(block=False)
-
-        # Saving the fig if we need to
-        if kwargs.get('save_img', False):
-            path = kwargs.get('path', './')
-            if path[-1] != '/':
-                path = f'{path}/'
-            if not os.path.isdir(path):
-                os.mkdir(path)
-            label = kwargs.get('label', '')
-            plt.savefig(f'{path}rew_rate_{label}.pdf', format="pdf", bbox_inches="tight")
-
-    def plot_replay(self, to_plot: str, batches: list, shape: list, **kwargs) -> None:
-        """
-        Plots the maze with the average replay or stopping frequencies in each state.
-        :param to_plot: 'loc' for where the agent stopped to replay, 'content' for what the agent reoplayed
-        :param batches: a list of the names of the batches we consider (each in a separate img, shared color scale)
-        :param shape: the shape of the subplots
-        :param kwargs:
-            save_img: do I want to save the output fig
-            path: if save_img, where do I want to save (default: ./)
-            label: if save_img, what tag should I attach to the figure name
-        :return:
-        """
-        if to_plot not in ['loc', 'content']:
-            raise ValueError('to_plot has to be either "loc" or "content"')
-        if to_plot == 'loc':
-            title = 'Stopped to replay at'
-        else:
-            title = 'Replayed'
-        fig, axes = plt.subplots(shape[0], shape[1], figsize=(8 * shape[1], 4 * shape[0]))
-        if shape[0] * shape[1] != len(batches):
-            raise ValueError('The number of batches has to be the same as the number of subplots')
-        elif shape[0] == 1 or shape[1] == 1:
-            axes = np.array([axes])  # So that later on I can index it
-
-        # Collecting the final dataframes
-        df = [None] * len(batches)  # All te dataframes
-        vmin, vmax = None, None
-        for batch_idx in range(len(batches)):
-            if to_plot == 'loc':
-                df[batch_idx] = pd.DataFrame(np.mean(self._stopped_at[batches[batch_idx]], axis=2))
-                lab = 'expected stops'
-                if self._norm_rep:
-                    lab = 'likelihood of stopping'
-            elif to_plot == 'content':
-                df[batch_idx] = pd.DataFrame(np.mean(self._replayed[batches[batch_idx]], axis=2))
-                lab = 'expected replay'
-                if self._norm_rep:
-                    lab = 'likelihood of replay'
-
-            # For normalization purposes
-            if batch_idx == 0:
-                vmin = df[batch_idx].to_numpy().min()
-                vmax = df[batch_idx].to_numpy().max()
-            else:
-                if vmin > df[batch_idx].to_numpy().min():
-                    vmin = df[batch_idx].to_numpy().min()
-                if vmax < df[batch_idx].to_numpy().max():
-                    vmax = df[batch_idx].to_numpy().max()
-
-        # The actual plotting
-        for batch_idx in range(len(batches)):
-            idx_x = math.floor(batch_idx / axes.shape[1])
-            idx_y = batch_idx % axes.shape[1]
-            axes[idx_x, idx_y].set_title(f'{title} ({batches[batch_idx]})')
-            sns.heatmap(df[batch_idx], ax=axes[idx_x, idx_y], vmin=vmin, vmax=vmax, cbar_kws={'label': lab})
-
-        plt.show(block=False)
-
-        if kwargs.get('save_img', False):
-            path = kwargs.get('path', './')
-            if path[-1] != '/':
-                path = f'{path}/'
-            if not os.path.isdir(path):
-                os.mkdir(path)
-            label = kwargs.get('label', '')
-            plt.savefig(f'{path}rep_{to_plot}_{label}.pdf', format="pdf", bbox_inches="tight")
-
-    def plot_cumul_rew_matrix(self, params: list, **kwargs):
-        """
-        Plots (and potentially stores) a matrix representation of the max (or mean) reward rates over a series of runs
-        :param params: The parameters constituting the x and y axes of the produced matrix [list of 2 strings]
-        :param kwargs:
-            save_img: do I want to save the output fig
-            path: if save_img, where do I want to save (default: ./)
-            label: if save_img, what tag should I attach to the figure name
-            method: if "mean" then mean cumulative reward rates will be computed instead of max (default). In this case
-                the matrix annotation will change too: instead of the parameters of the best model, we'll use the avg
-                reward rate as label
-        :return:
-        """
-        if self._use_epochs is None:
-            raise ValueError(
-                'Cannot compute cumulative rewards without knowing if the experiment is epoch or step based.')
-        # 1) Preparing the figure
-        fig, ax = plt.subplots(1, 1, figsize=(1.8 * len(self._cumul_rew[params[0]].unique()),
-                                              1.5 * len(self._cumul_rew[params[1]].unique())))
-        titl = 'step'
-        if self._use_epochs:
-            titl = 'epoch'
-        beg = self._win_begin
-        if self._win_begin < 0:
-            beg = f'(end - {-self._win_begin})'
-        end = self._win_end
-        if self._win_end is None:
-            end = 'the end'
-        elif self._win_end < 0:
-            end = f'(end - {-self._win_end})'
-            titl = titl + 's'
-
-        # 2) Preparing the data -- we take the maximum for each group
-        method = kwargs.get('method', 'max')
-        if method == 'max':
-            ax.set_title(f'Max cumulative rewards between {titl} {beg} and {end}')
-            # 2.a) We can find the max of the cum reward rates
-            cumul_mat = self._cumul_rew.loc[
-                self._cumul_rew.groupby(params)['cumul_rew'].transform(max) == self._cumul_rew['cumul_rew']]
-            # Since this returns *all* maxima, we might want to drop the duplicates, otherwise it'll be impossible to plot
-            cumul_mat = cumul_mat.drop_duplicates(params, keep='first')
-            # Now we need to do pandas magic to make it understand non-numeric axis values
-            cumul_mat_heatmap = cumul_mat.pivot(columns=params[0], index=params[1], values='cumul_rew')
-            # And we need to make an identically shaped annotation matrix
-            cumul_mat_annot = None
-            for col_name in cumul_mat.columns:
-                if col_name in params or col_name == 'cumul_rew':
-                    continue
-                if cumul_mat_annot is None:
-                    cumul_mat_annot = f'{col_name}=' + cumul_mat.pivot(columns=params[0], index=params[1],
-                                                                       values=col_name)
-                else:
-                    cumul_mat_annot += f'\n {col_name}=' + cumul_mat.pivot(columns=params[0], index=params[1],
-                                                                           values=col_name)
-            lab = 'max cumulative reward'
-            annot_format = ''
-        elif method == 'mean':
-            ax.set_title(f'Mean cumulative rewards between {titl} {beg} and {end}')
-            # 2.b) Or we can just plot the means
-            cumul_mat = self._cumul_rew.groupby(params)['cumul_rew'].mean()
-            # Then we basically need to "un-groupby" it
-            cumul_mat_heatmap = cumul_mat.reset_index(params)
-            # And then make sure that pandas understands non-numeric axis values
-            cumul_mat_heatmap = cumul_mat_heatmap.pivot(columns=params[0], index=params[1], values='cumul_rew')
-            # Finally the annotation matrix, here it will only contain the reward values
-            cumul_mat_annot = cumul_mat_heatmap
-            lab = 'mean cumulative reward'
-            annot_format = '.2f'
-        else:
-            raise ValueError('Method has to be "max" or "mean".')
-        sns.heatmap(cumul_mat_heatmap, annot=cumul_mat_annot, cbar_kws={'label': lab}, fmt=annot_format)
-        ax.invert_yaxis()
-        plt.show(block=False)
-
-        # 3) Saving if necessary
-        if kwargs.get('save_img', False):
-            path = kwargs.get('path', './')
-            if path[-1] != '/':
-                path = f'{path}/'
-            if not os.path.isdir(path):
-                os.mkdir(path)
-            label = kwargs.get('label', '')
-            plt.savefig(f'{path}{method}_cumul_rew_{params[0]}_{params[1]}_{label}.pdf', format="pdf",
-                        bbox_inches="tight")
