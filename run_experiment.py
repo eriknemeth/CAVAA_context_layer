@@ -55,31 +55,30 @@ def spatial_navigation() -> None:
     ####################################################################################################################
     # Let's start by defining the SEC agent's parameters
     SEC_params = dict()
-    # SEC_params['action_space'] = len(env_params['actions'])
+    SEC_params['action_space'] = len(env_params['actions'])
     # 
     # # About the agent
-    # SEC_params['pl'] = 2
-    # SEC_params['stm'] = 15  # default: 50, test: 10
-    # SEC_params['ltm'] = 250  # default: 50K, test: 10K
-    # SEC_params['sequential_bias'] = True  # default: True
-    # SEC_params['sequential_value'] = 0.02  # default animalai: 0.01
-    # SEC_params[
-    #     'forget_mode'] = 'RWD-SING'  # types = ['FIFO-SING', 'FIFO-PROP', 'RWD-SING', 'RWD-PROP', 'LRU-SING', 'LRU-PROP', 'LRU-PROB'] - default: FIFO-SING
-    # SEC_params['forget_ratio'] = 0.1  # default = 0.1
-    # SEC_params['retrieval'] = 'default'  # types = ['default', 'k_neighbors']
-    # SEC_params[
-    #     'similarity_threshold'] = 0.995  # DEFAULT: 0.1, for ERLAM RPs dim 4: 0.0000001, DEFAULT for SEC AE dim 20: 0.2, SEX initial: 0.1
-    # SEC_params['k_neighbors'] = 1  # DEFAULT FOR MFEC IN ATARI - 11 NEIGHBORS PER ACTION BUFFER!
-    # SEC_params[
-    #     'value_function'] = 'noDist'  # value_functions = ['default', 'noGi', 'noDist', 'noRR', 'soloGi', 'soloDist', 'soloRR']
-    # SEC_params['reward_decay'] = 0.9  # default animalai: 0.9
-    # SEC_params['softmax'] = False  # originally = False, ATARI = True
-    # SEC_params['selection_mode'] = 'argmax'  # selection_mode = ['default', 'argmax']
-    # SEC_params['exploration_mode'] = 'epsilon'  # exploration_mode = ['default', 'epsilon', 'epsilon_decay']
-    # SEC_params[
-    #     'exploration_steps'] = 150  # THE UNITS ARE NUMBER OF AGENT STEPS! - NatureDQN: 50k STEPS / 50 EPISODES ANIMALAI
-    # SEC_params['epsilon'] = 0.1  # DEFAULT FOR MFEC IN ATARI: 0.1
-    # SEC_params['load_ltm'] = False
+    SEC_params['emb'] = 2
+    SEC_params['stm'] = 15  # default: 50, test: 10
+    SEC_params['ltm'] = 250  # default: 50K, test: 10K
+
+    SEC_params['sequential_bias'] = True
+    SEC_params['value_function'] = 'noGi'  # value_functions = ['default', 'noGi', 'noDist', 'noRR', 'soloGi', 'soloDist', 'soloRR']
+    SEC_params['forget'] = 'FIFO'  # types = ['FIFO-SING', 'FIFO-PROP', 'RWD-SING', 'RWD-PROP', 'LRU-SING', 'LRU-PROP', 'LRU-PROB'] - default: FIFO-SING
+    
+    SEC_params['coll_threshold_act'] = 0.98  # default: 0.98
+    SEC_params['coll_threshold_proportion'] = 0.995  # default animalai: 0.995
+    
+    SEC_params['alpha_trigger'] = 0.05  # default = 0.05
+    SEC_params['tau_decay'] = 0.9  # default animalai: 0.9
+    SEC_params['load_ltm'] = False
+
+    SEC_params['exploration_mode'] = 'default'  # exploration_mode = ['default', 'fixed', 'epsilon', 'epsilon_decay']
+    SEC_params['exploration_steps'] = 150  # THE UNITS ARE NUMBER OF AGENT STEPS! - NatureDQN: 50k STEPS / 50 EPISODES ANIMALAI
+    SEC_params['epsilon'] = 0.05  # DEFAULT FOR MFEC IN ATARI: 0.1
+
+    SEC_params['selection_mode'] = 'default'  # selection_mode = ['default', 'argmax']
+    SEC_params['memory_threshold'] = 1  # originally = 4
     ####################################################################################################################
 
     ####################################################################################################################

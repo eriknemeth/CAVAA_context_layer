@@ -3,7 +3,7 @@ import numpy as np
 from SORB_agent import *
 
 
-# from SEC_agent import *
+from SEC_agent import *
 
 class metaAgent():
     """
@@ -15,7 +15,7 @@ class metaAgent():
         self._actions = {SORB_params['actions'][idx]: int(idx) for idx in range(len(SORB_params['actions']))}
         self._states = np.array([[SORB_params['curr_state']]])
         SORB_params['curr_state'] = self.__decode_state__(SORB_params['curr_state'])
-        # self._SEC = SECagent(**SEC_params)
+        self._SEC = SECagent(**SEC_params)
         self._SORB = RLagent(**SORB_params)
         return
 
@@ -58,7 +58,7 @@ class metaAgent():
         """
         # 1) MF action selection
         # action_SEC, Q_SEC = self.MF.action_selection(state)
-        # action_SEC, Q_SEC = self._SEC.choose_action(state)
+        action_SEC, Q_SEC = self._SEC.choose_action(state)
 
         # 2) MB action selection
         decoded_state = self.__decode_state__(state)
@@ -66,9 +66,10 @@ class metaAgent():
                                                        np.array([self._actions[move] for move in poss_moves]))
 
         # 3) Compare results
-        # if Q_SEC >= Q_SORB:
-        #     return list(self._actions.keys())[list(self._actions.values()).index(action_SEC)], True
-        return list(self._actions.keys())[list(self._actions.values()).index(action_SORB)], False
+        if Q_SEC >= Q_SORB:
+            return list(self._actions.keys())[list(self._actions.values()).index(action_SEC)], True
+        else:
+            return list(self._actions.keys())[list(self._actions.values()).index(action_SORB)], False
 
     def learning(self, state: np.ndarray, action: str, new_state: np.ndarray, reward: float) -> bool:
         """
@@ -88,9 +89,9 @@ class metaAgent():
 
         # 1) Teach the MF agent
         # Update SEC's STM based on previous (state,action) couplet
-        # self._SEC.update_STM(sa_couplet=[state, self._actions[action]])
-        # self._SEC.update_sequential_bias()
-        # self._SEC.update_LTM(reward)
+        self._SEC.update_STM(sa_couplet=[state, self._actions[action]])
+        self._SEC.update_sequential_bias()
+        self._SEC.update_LTM(reward)
 
         # 2) Teach the MB agents
         decoded_state = self.__decode_state__(state)
@@ -111,7 +112,7 @@ class metaAgent():
         """
         Reset the short-term memory of the MF agent
         """
-        # self._SEC.reset_memory()
+        self._SEC.reset_memory()
 
     def toggle_save(self):
         """
