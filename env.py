@@ -232,7 +232,7 @@ class Env:
 
     # And receiving communication from the agent
 
-    def step(self, s: int, a: int) -> Tuple[int, float]:
+    def step(self, s: int, a: int) -> Tuple[int, float, bool]:
         """
         Performs a step from state s (as per designated by the agent), taking action a (as per chosen in advance), and
         returns the observed outcome.
@@ -242,7 +242,8 @@ class Env:
 
         :param s: state label, as per understood by the agent
         :param a: action label, following the indexing of self._act
-        :return: new state label as per understood by the agent (int), and corresponding reward (float)
+        :return: new state label as per understood by the agent (int), and corresponding reward (float), and whether
+            this epoch is over
         """
         # Let's remove the agent from the starting state
         [x, y] = np.argwhere(self._maze == s)[0]
@@ -273,7 +274,7 @@ class Env:
 
         # Saving
         self.__save_step__()
-        return s_prime, rew
+        return s_prime, rew, rew > 0
 
     def place_reward(self, reward_state: int, reward_val: float, reward_prob: float) -> None:
         """
@@ -303,7 +304,7 @@ class Env:
         self._reward_prob = np.zeros(self._maze.shape)
         return
 
-    def place_agent(self, init_state: int) -> None:
+    def place_agent(self, init_state: int) -> int:
         """
         A function to place the agent onto state init_state. If saving is on this function will overwrite the location
         of the agent in the last row of the memory.
@@ -318,7 +319,7 @@ class Env:
 
         # Take care of saving by overwriting the last element
         self.__overwrite_step__(x, y)
-        return
+        return init_state
 
     # About saving
     def toggle_save(self, **kwargs) -> None:

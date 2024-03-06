@@ -28,11 +28,12 @@ class RLagent:
     its memory.
     """
 
-    def __init__(self, mdp: Env, model_type: str, gamma: float, kappa: float, decision_rule: str, **kwargs):
+    def __init__(self, act_num: int, curr_state: int, model_type: str, gamma: float, kappa: float, decision_rule: str, **kwargs):
         """
         Constructor for the basic instance of a Reinforcement Learning Agent.
         Exceptions: ValueError, if the str parameters are invalid
-        :param mdp: the environment
+        :param act_num: number of possible actions
+        :param curr_state: ID of the current state
         :param model_type: temporal difference ['TD'], value iteration ['VI'] or policy iteration ['PI']
         :param gamma: discounting factor [float]
         :param kappa: decay factor of EWMA computation of the reward function. Theoretically this is only needed for the
@@ -73,13 +74,9 @@ class RLagent:
 
         # The parameters of the environment
         known_env = kwargs.get('known_env', False)
-        if known_env:
-            self._nS = mdp.state_num()  # number of possible states
-        else:
-            self._nS = 1  # We might only know a single state of the environment (the one we're in)
-            self._states = np.array([mdp.curr_state()])  # an array of sates. The idx of each state is my state label
-        self._nA = mdp.act_num()  # max number of possible actions per state
-        self._maxrew = mdp.max_rew()  # max value of the achievable reward
+        self._nS = 1  # We might only know a single state of the environment (the one we're in)
+        self._states = np.array([curr_state])  # an array of sates. The idx of each state is my state label
+        self._nA = act_num  # max number of possible actions per state
 
         # The parameters of the agent
         self._gamma = gamma

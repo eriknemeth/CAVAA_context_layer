@@ -1,5 +1,6 @@
 from SORB_agent import *
 from tqdm import tqdm
+from meta_agent import *
 import re
 
 def experiment_plotter(path: str, env_file: str, agent_file: str, **kwargs):
@@ -16,276 +17,161 @@ def experiment_plotter(path: str, env_file: str, agent_file: str, **kwargs):
     dTm.load_events(agent_file, 'MB', path=path)
     dTm.plot_events()
 
-
-def complex_experiment(save_path: str, tag: str, dec_weights, **kwargs) -> None:
+def spatial_navigation() -> None:
     """
-    Based on Massi et al.
-    double reward maze, free motion
-    :return:
+    This function realizes the simple navigation by creating a meta agent and passing the messages from the environment
+    to it
+    Returns:
     """
-
-    # The parameters I have tested
-    rep_weights = kwargs.get('rep_weights', dec_weights)
-    replay_threshold = kwargs.get('replay_threshold', 0.02)
-    decision_rule = kwargs.get('decision_rule', 'softmax')
-    add_predecessors = kwargs.get('add_predecessors', 'both')
-    rew_change = kwargs.get('rew_change', 1 / 3)
-    new_rew_loc = kwargs.get('new_rew_loc', np.array([9]))
-    new_rew_val = kwargs.get('new_rew_val', np.array([5]))
-
-    model_type = kwargs.get('model_type', 'MB')
-    max_replay = kwargs.get('max_replay', 50)
-    known_env = kwargs.get('known_env', True)
-    replay_type = kwargs.get('replay_type', 'priority')
-
-    # Creating a model
-    params = dict()
+    ####################################################################################################################
+    # Parameters of the experiment
+    # TODO rewise these parameters, potentially adaptively, and replace the test environment
+    env_params = dict()
+    steps = 1000
+    env_params['actions'] = ['0', '1', '2', '3']
 
     # About saving
-    params['save_data'] = True  # --------------------------- Should save the steps taken into a csv?
-    if params['save_data']:
-        params['save_path'] = save_path  # --------------- Where should I save
-        params['save_tag'] = tag  # ------------------------- What tag should I put on saved data
+    env_params['save_data'] = True  # -------------------- Should I even save at all
+    if env_params['save_data']:
+        env_params['save_path'] = './savedata'  # -------- Where should I save
+        env_params['save_tag'] = None  # ----------------- What tag should I put on saved data
 
     # About the maze
-    params['use_epochs'] = False  # ------------------------- If [True] we use epochs, if [False] we use steps
-    params['num_runs'] = 1000  # ---------------------------- How many steps/epochs do we model
-    params['rew_change'] = None  # params['num_runs'] * rew_change  # - When do we change the reward location (if we do)
-    params['rew_loc'] = np.array([11, 20])  # --------------- What is (are) the rewarded state(s)
-    params['rew_val'] = np.array([5, 1])  # ----------------- What is (are) the value(s) of the reward(s)
-    params['rew_prob'] = np.array([1, 1])  # ---------------- What is (area) the probability/ies of the reward(s)
-    params['new_rew_loc'] = new_rew_loc  # ------------------ What is (are) the rewarded state(s)
-    params['new_rew_val'] = new_rew_val  # ------------------ What is (are) the value(s) of the reward(s)
-    params['new_rew_prob'] = np.ones(new_rew_loc.shape)  # -- What is (area) the probability/ies of the reward(s)
-    params['start_pos'] = 21  # ----------------------------- What state do we start from
-    params['env_forbidden_walls'] = False  # ----------------- Is it forbidden to bump into walls?
-    params['restricted_dT'] = False  # ---------------------- Is the movement restricted to unidirectional?
-    params['slip_prob'] = 0  # ------------------------------ The probability of slipping after a step
+    env_params['use_epochs'] = False  # ------------------- If [True] we use epochs, if [False] we use steps
+    env_params['num_runs'] = steps  # --------------------- How many steps do we model
+    env_params['rew_change'] = None  # -------------------- When do we change the reward location (if we do)
+    env_params['rew_loc'] = np.array([11, 20])  # --------- What is (are) the rewarded state(s)
+    env_params['rew_val'] = np.array([5, 1])  # ----------- What is (are) the value(s) of the reward(s)
+    env_params['rew_prob'] = np.array([1, 1])  # ---------- What is (area) the probability/ies of the reward(s)
+    env_params['new_rew_loc'] = None  # ------------------- What is (are) the rewarded state(s)
+    env_params['new_rew_val'] = None  # ------------------- What is (are) the value(s) of the reward(s)
+    env_params['new_rew_prob'] = None  # ------------------ What is (area) the probability/ies of the reward(s)
+    env_params['start_pos'] = 21  # ----------------------- What state do we start from
+    env_params['forbidden_walls'] = False  # -------------- Is it forbidden to bump into walls?
+    env_params['restricted_dT'] = False  # ---------------- Is the movement restricted to unidirectional?
+    env_params['slip_prob'] = 0  # ------------------------ The probability of slipping after a step
+    ####################################################################################################################
+
+    ####################################################################################################################
+    # Let's start by defining the SEC agent's parameters
+    SEC_params = dict()
+    # SEC_params['action_space'] = len(env_params['actions'])
+    # 
+    # # About the agent
+    # SEC_params['pl'] = 2
+    # SEC_params['stm'] = 15  # default: 50, test: 10
+    # SEC_params['ltm'] = 250  # default: 50K, test: 10K
+    # SEC_params['sequential_bias'] = True  # default: True
+    # SEC_params['sequential_value'] = 0.02  # default animalai: 0.01
+    # SEC_params[
+    #     'forget_mode'] = 'RWD-SING'  # types = ['FIFO-SING', 'FIFO-PROP', 'RWD-SING', 'RWD-PROP', 'LRU-SING', 'LRU-PROP', 'LRU-PROB'] - default: FIFO-SING
+    # SEC_params['forget_ratio'] = 0.1  # default = 0.1
+    # SEC_params['retrieval'] = 'default'  # types = ['default', 'k_neighbors']
+    # SEC_params[
+    #     'similarity_threshold'] = 0.995  # DEFAULT: 0.1, for ERLAM RPs dim 4: 0.0000001, DEFAULT for SEC AE dim 20: 0.2, SEX initial: 0.1
+    # SEC_params['k_neighbors'] = 1  # DEFAULT FOR MFEC IN ATARI - 11 NEIGHBORS PER ACTION BUFFER!
+    # SEC_params[
+    #     'value_function'] = 'noDist'  # value_functions = ['default', 'noGi', 'noDist', 'noRR', 'soloGi', 'soloDist', 'soloRR']
+    # SEC_params['reward_decay'] = 0.9  # default animalai: 0.9
+    # SEC_params['softmax'] = False  # originally = False, ATARI = True
+    # SEC_params['selection_mode'] = 'argmax'  # selection_mode = ['default', 'argmax']
+    # SEC_params['exploration_mode'] = 'epsilon'  # exploration_mode = ['default', 'epsilon', 'epsilon_decay']
+    # SEC_params[
+    #     'exploration_steps'] = 150  # THE UNITS ARE NUMBER OF AGENT STEPS! - NatureDQN: 50k STEPS / 50 EPISODES ANIMALAI
+    # SEC_params['epsilon'] = 0.1  # DEFAULT FOR MFEC IN ATARI: 0.1
+    # SEC_params['load_ltm'] = False
+    ####################################################################################################################
+
+    ####################################################################################################################
+    # Then let's define the MB agent's parameters:
+    SORB_params = dict()
+    SORB_params['actions'] = env_params['actions']  # ------- What are the possible actions
+
+    # About saving
+    SORB_params['save_data'] = True  # ---------------------- Should save the steps taken into a csv?
+    if SORB_params['save_data']:
+        SORB_params['save_path'] = './savedata'  # ---------- Where should I save
+        SORB_params['save_tag'] = None  # ------------------- What tag should I put on saved data
 
     # About the agent
-    params[
-        'known_env'] = known_env  # --------------------------- Is the state-space known in advance [True] or not [False]
-    params['model'] = model_type  # ------------------------------- Model free or model based
+    SORB_params['act_num'] = 4  # --------------------------- Size of action space # TODO make it adaptive
+    SORB_params['known_env'] = False  # --------------------- Is the environment known in advance
+    SORB_params['model_type'] = 'VI'  # --------------------- 'VI' value iteration or 'TD' temporal difference
+    if SORB_params['model_type'] == 'TD':
+        SORB_params['alpha'] = 0.8  # ----------------------- from Massi et al. (2022) MF-priority
+    SORB_params['kappa'] = 1  # ----------------------------- Learning rate for the model
+    SORB_params['gamma'] = 0.9  # --------------------------- Discounting factor
+    SORB_params['decision_rule'] = 'softmax'  # ------------- Could be 'max', 'softmax', 'epsilon'
+    if SORB_params['decision_rule'] == 'epsilon':
+        SORB_params['epsilon'] = 0.1  # --------------------- Epsilon of the epsilon-greedy
+    elif SORB_params['decision_rule'] == 'softmax':
+        SORB_params['beta'] = 10  # ------------------------- Beta for softmax
+    SORB_params['replay_type'] = 'priority'  # -------------- 'priority', 'trsam', 'bidir', 'backwards', 'forward'
+    if SORB_params['replay_type'] in ['priority', 'bidir']:
+        SORB_params['event_handle'] = 'sa'  # --------------- What is each new memory compared to [s, sa, sas]
+    SORB_params['event_content'] = 'sas'  # ----------------- What is not estimated from model [s, sa, sas, sasr]
+    SORB_params['replay_thresh'] = 0.02  # ------------------ Smallest surprise necessary to initiate replay
+    SORB_params['max_replay'] = 50  # ----------------------- Max replay steps per replay event
+    SORB_params['add_predecessors'] = 'both'  # ------------- When should I add predecessors (None, act, rep or both)
+    SORB_params['forbidden_walls'] = False  # --------------- If we replay (simulate), is bumping into a wall forbidden?
+    SORB_params['dec_weights'] = np.array([0.4, 0.4, 0.2])  # The weights used for decision-making [Q, Ur, Ut] float
+    SORB_params['rep_weigths'] = np.array([0.4, 0.4, 0.2])  # The weights used for replay [Q, Ur, Ut] float
+    ####################################################################################################################
 
-    if params['model'] == 'MF':
-        params['model_type'] = 'TD'  # ---------------------- TD (for MF) or VI/PI (for MB)
-        params['alpha'] = 0.8  # ---------------------------- from Massi et al. (2022) MF-priority
-    elif params['model'] == 'MB':
-        params['model_type'] = 'VI'  # ---------------------- TD (for MF) or VI/PI (for MB)
-        params['pre_training'] = None  # -------------------- how many steps do we pre-train
-    params['gamma'] = 0.9  # -------------------------------- Discounting factor
-    params['kappa'] = 1  # -------------------------------- Learning rate for the model (needed for the epist rewards)
-    params['decision_rule'] = decision_rule  # -------------- Greedy decisions (could be 'max', 'softmax', 'epsilon')
-    if params['decision_rule'] == 'epsilon':
-        params['epsilon'] = 0.1  # -------------------------- Epsilon of the epsilon-greedy
-    elif params['decision_rule'] == 'softmax':
-        params['beta'] = 10  # ------------------------------ Beta for softmax from Massi et al. (2022) MF-priority
-    params['replay_type'] = replay_type  # ------------------ 'priority', 'trsam', 'bidir', 'backwards', 'forward'
-    params['replay_every_step'] = True
-    if params['replay_type'] in ['trsam', 'bidir']:
-        params['replay_every_step'] = False
-    if params['replay_type'] in ['priority', 'bidir']:
-        params['event_handle'] = 'sa'  # -------------------------- What is each new memory compared to [s, sa, sas]
-    params['event_content'] = 'sas'  # ------------------------ What is not estimated from model [s, sa, sas, sasr]
-    params['replay_thresh'] = replay_threshold  # ----------- Smallest surprise necessary to initiate replay
-    params['max_replay'] = max_replay  # ---------------------------- Max replay steps per replay event
-    params['add_predecessors'] = add_predecessors  # -------- When do I add state predecessors (None, act, rep or both)
-    params[
-        'replay_forbidden_walls'] = False  # ----------------- If we replay (simulate), is bumping into a wall forbidden?
-    params['dec_weights'] = dec_weights  # ------------------ The weights used for decision-making [Q, Ur, Ut] float
-    params['rep_weigths'] = rep_weights  # ------------------ The weights used for replay [Q, Ur, Ut] float
+    ####################################################################################################################
+    # Initializing the environment and the agent
+    env = DTMaze(forbidden_walls=env_params['forbidden_walls'],
+                 restricted_dT=env_params['restricted_dT'],
+                 slip_prob=env_params['slip_prob'])
 
-    run_dT(**params)
+    # 1) Get the first state
+    # TODO need env or obtain 1st state
+    env.place_reward(env_params['rew_loc'],
+                     env_params['rew_val'],
+                     env_params['rew_prob'])
+    state = env.place_agent(env_params['start_pos'])
+    SORB_params['curr_state'] = state
 
+    META = metaAgent(SEC_params=SEC_params, SORB_params=SORB_params)
+    ####################################################################################################################
 
-def run_dT(rew_loc: np.ndarray, start_pos: int, num_runs: int,
-           model: str, model_type: str, gamma: float, kappa: float, decision_rule: str,
-           **kwargs):
-    """
-    Runs the double-T-maze experiment
-    :param rew_loc: where the OG reward will be placed
-    :param start_pos: where the agent starts from
-    :param num_runs: how many steps/epochs are we modelling
-    :param model: 'MF' or 'MB'
-    :param model_type: 'TD', 'VI' or 'PI'
-    :param gamma: discount factor
-    :param kappa: weighing parameter for the internal model (also used for the epist rew in both agnets!!!) [float]
-    :param decision_rule: 'max', 'epsilon' or 'softmax'
-    :param kwargs:
-        Environment-related variables:
-            use_epochs: if [True] we use epochs instead of steps (an epoch ends when a reward is received)
-            env_forbidden_walls: can the agent choose to bump into a wall [bool]
-            restricted_dT: is the movement unidirectional or not [bool]
-            slip_prob: probability of slipping while moving [float]
-            rew_val: value of reward [float array]
-            rew_prob: proba of reward [float array]
-            rew_change: what step will we change the reward location (if we do) [int]
-                new_rew_loc: where the reward will be placed after the location change [int array]
-                new_rew_val: value of reward [float array]
-                new_rew_prob: proba of reward [float array]
-        Agent-related variables:
-            known_env: is the state-space previously known [True] or not [False, default]
-            based on 'model':
-                alpha: learning parameter for the MF agent [float]
+    ####################################################################################################################
+    # Initiating saving for visual purposes
+    if env_params['save_data']:
+        env.toggle_save()
+    if SORB_params['save_data']:
+        META.toggle_save()
 
-                pre_training: number of unrewarded pre-training steps (for tuning the model of MB agent) [int]
-            based on 'decision_rule':
-                epsilon: exploration constant of epsilon greedy agent [float]
-                beta: exploitation constant of softmax agent [float]
-            replay_type: 'forward', 'backward', 'priority', 'trsam', 'bidir' or None:
-                replay_every_step: do I replay after every step [True, default] or only after receiving a reward [False]
-                event_handle: what should we compare a new event to when trying to estimate if we need to
-                    overwrite an old memory or not: states ['s'], state-action ['sa'] or
-                    state-action-new state ['sas']. Only needed if replay_type is "priority" or "bidir"
-                event_content: what should we replay, states ['s'], state-action ['sa'],
-                    state-action-new state ['sas'], or state-action-new state-reward ['sasr', default].
-                replay_thresh: replay threshold [float]
-                max_replay: max number of replay steps [int]
-                add_predecessors: for priority and bidir, when do I add predecessors to the buffer ['act', 'rep',
-                    'both', None]
-                replay_forbidden_walls: is choosing a wall forbidden for replay [True] or not [False]
-            dec_weight: weight of the different quality functions contributing to decisions [Q, Ur, Ut], float array
-            rep_weight: weight of the different quality functions contributing to replay [Q, Ur, Ut], float array
-        Storing-related variables:
-            save_data: Should we save the data generated [True] or not [False, default]
-            save_path: Where should we save [str] (default: current folder)
-            save_tag: What tag should I add to the end of the filename [str, default: None]
-    :return:
-    """
-    # Arguments for the environment
-    use_epochs = kwargs.get('use_epochs', False)
-    env_forbidden_walls = kwargs.get('env_forbidden_walls', False)
-    restricted_dT = kwargs.get('restricted_dT', False)
-    slip_prob = kwargs.get('slip_prob', 0)
-    rew_val = kwargs.get('rew_val', np.ones(rew_loc.shape))
-    rew_prob = kwargs.get('rew_prob', np.ones(rew_loc.shape))
-    rew_change = kwargs.get('rew_change', None)
-    new_rew_loc = kwargs.get('new_rew_loc', rew_loc)
-    new_rew_val = kwargs.get('new_rew_val', rew_val)
-    new_rew_prob = kwargs.get('new_rew_prob', rew_prob)
-
-    # Arguments for the model
-    known_env = kwargs.get('known_env', False)
-    alpha, epsilon, beta, pre_training = None, None, None, None
-    if model == 'MF':
-        alpha = kwargs.get('alpha', None)
-    elif model == 'MB':
-        pre_training = kwargs.get('pre_training', None)
-    if decision_rule == 'epsilon':
-        epsilon = kwargs.get('epsilon', None)
-    elif decision_rule == 'softmax':
-        beta = kwargs.get('beta', None)
-    replay_type = kwargs.get('replay_type', None)
-    event_handle = kwargs.get('event_handle', None)
-    event_content = kwargs.get('event_content', 'sasr')
-    replay_every_step = kwargs.get('replay_every_step', True)
-    replay_thresh = kwargs.get('replay_thresh', None)
-    max_replay = kwargs.get('max_replay', None)
-    add_predecessors = kwargs.get('add_predecessors', None)
-    replay_forbidden_walls = kwargs.get('replay_forbidden_walls', True)
-    dec_weights = kwargs.get('dec_weights', np.array([0.75, 0.2, 0.05]))
-    rep_weights = kwargs.get('rep_weights', dec_weights)
-
-    # Arguments about saving
-    save_data = kwargs.get('save_data', False)
-    save_path = kwargs.get('save_path', None)
-    save_tag = kwargs.get('save_tag', None)
-
-    # 0) Creating the environment and the agent within
-    dTm = DTMaze(forbidden_walls=env_forbidden_walls, restricted_dT=restricted_dT, slip_prob=slip_prob)
-    dTm.place_agent(start_pos)
-
-    agent = None
-    agent = RLagent(dTm, model_type, gamma, kappa, decision_rule, alpha=alpha,
-                    beta=beta, epsilon=epsilon, known_env=known_env,
-                    replay_type=replay_type, event_content=event_content, event_handle=event_handle,
-                    replay_thresh=replay_thresh, max_replay=max_replay,
-                    dec_weights=dec_weights, rep_weights=rep_weights,
-                    add_predecessors=add_predecessors, forbidden_walls=replay_forbidden_walls)
-    if model == 'MB':
-        # 1) Pre-training if the agent is MB
-        run_experiment(pre_training, start_pos, dTm, agent, use_epochs=use_epochs, pre_training=True)
-
-    # 2) Preparing the experiment
-    for r_idx in range(len(rew_loc)):
-        dTm.place_reward(rew_loc[r_idx], rew_val[r_idx], rew_prob[r_idx])
-    dTm.place_agent(start_pos)
-    # agent.update_agent(dTm)
-    if save_data:
-        dTm.toggle_save()
-        agent.toggle_save()
-
-    # 3) Running the experiment (with and without reward change)
-    if rew_change is None:
-        run_experiment(num_runs, start_pos, dTm, agent, use_epochs=use_epochs, replay_thresh=replay_thresh,
-                       replay_every_step=replay_every_step)
-    else:
-        run_experiment(rew_change, start_pos, dTm, agent, use_epochs=use_epochs, replay_thresh=replay_thresh,
-                       replay_every_step=replay_every_step)
-        dTm.reset_reward()
-        for r_idx in range(len(new_rew_loc)):
-            dTm.place_reward(new_rew_loc[r_idx], new_rew_val[r_idx], new_rew_prob[r_idx])
-        # agent.update_agent(dTm)
-        run_experiment(num_runs - rew_change, start_pos, dTm, agent, use_epochs=use_epochs, replay_thresh=replay_thresh,
-                       replay_every_step=replay_every_step)
-
-    # 4) Save everything
-    if save_data:
-        dTm.dump_env(path=save_path, label=save_tag)
-        agent.dump_agent(path=save_path, label=save_tag)
-
-
-def run_experiment(num_runs: int, start_pos: int, env: Env, agent: RLagent, **kwargs):
-    """
-    Runs an experiment of a pre-defined length
-    :param num_runs: how many steps/epochs we are modelling
-    :param start_pos: where the agent is starting from
-    :param env: what is the environment
-    :param agent: what is the agent
-    :param kwargs:
-        use_epochs: if [True] we use epochs instead of steps. An epoch ends when a reward is received
-        replay_thresh: what is the threshold to trigger replay (if None, no replay)
-        pre_training: is this a pre-training setting [True -- no need to learn Q values] or not [False]
-        replay_every_step: do I replay after each step [True -- default] of only after getting a reward [False]
-    :return:
-    """
-    if num_runs is None:
-        return
-    use_epochs = kwargs.get('use_epochs', False)
-    replay_thresh = kwargs.get('replay_thresh', None)
-    pre_training = kwargs.get('pre_training', False)
-    if pre_training and agent.agent_type() == 'MF':
-        raise ValueError('Cannot pre-train a model-free agent.')
-    replay_every_step = kwargs.get('replay_every_step', True)
-
-    step = 0
-    pbar = tqdm(total=num_runs)
-    while step < num_runs:
-        # 1) Observe the environment
-        s = env.curr_state()
-        a_poss = env.possible_moves(s)
-
+    # Running the experiment
+    # TODO there is a mismatch between the expected and received state and action types
+    for step in tqdm(range(env_params['num_steps'])):
         # 2) Choose an action
-        a = agent.choose_action(s, a_poss)
+        poss_moves = env.possible_moves(state)
+        action, SEC_winner = META.action_selection(state, poss_moves)
 
-        # 3) Perform a step
-        s_prime, r = env.step(s, a)
+        # 3) Commit to action
+        new_state, reward, done = env.step(state, action)
 
         # 4) Learn
-        hr, ht = agent.model_learning(s, a, s_prime, r)  # The epistemic rewards
-        if not pre_training:
-            delta_C = agent.inference(s, a, s_prime, np.array([r, hr, ht]))
-            if replay_thresh is not None and replay_every_step and abs(delta_C) > replay_thresh:
-                agent.memory_replay(s=s)
+        replayed = META.learning(state, action, new_state, reward)
 
-        # 5) Return to start if I must
-        if r > 0:
-            env.place_agent(start_pos)
-            if use_epochs:
-                step += 1
-                pbar.update(1)
-            if not replay_every_step:
-                agent.memory_replay(s=env.curr_state())
-        if not use_epochs:
-            step += 1
-            pbar.update(1)
+        # 5) If the agent reached a reward, send it back to the starting position
+        if done:
+            state = env.place_agent(env_params['start_pos'])
+            META.reset()
+        else:
+            state = new_state
+
+        # 6) Change reward location if must
+        if step == env_params['rew_change']:
+            env.reset_reward()
+            env.place_reward(env_params['new_rew_loc'],
+                             env_params['new_rew_val'],
+                             env_params['new_rew_prob'])
+
+    # 7) Save for visualization
+    if env_params['save_data']:
+        env.dump_env(path=env_params['save_path'], label=env_params['save_tag'])
+    if SORB_params['save_data']:
+        META.dump_agent(path=SORB_params['save_path'], label=SORB_params['save_tag'])
+    ####################################################################################################################
