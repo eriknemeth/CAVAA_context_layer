@@ -1,5 +1,6 @@
 from env import *
 from math import *
+from typing import Union
 
 # If we don't know the state space in advance, adding to _events memory dataframe will produce a performance warning due
 # to "fragmentation". We, however, cannot be bothered at the moment.
@@ -178,7 +179,7 @@ class RLagent:
         return
 
     # Methods related to the inner workings of the agent
-    def __translate_s__(self, s: int) -> int | None:
+    def __translate_s__(self, s: int) -> Union[int, None]:
         """
         Translates s into labels recognized by the agent (in case of automatically increasing state space)
         :param s: the state as detected from the environment
@@ -191,7 +192,7 @@ class RLagent:
         except AttributeError:
             return s
 
-    def __entropy__(self, s: int, a: int, mode: str) -> float | None:
+    def __entropy__(self, s: int, a: int, mode: str) -> Union[float, None]:
         """
         Computes the entropy under the specified circumstances
         :param s: The state
@@ -206,7 +207,7 @@ class RLagent:
             return entropy(np.array([self._Pr[s, a], 1 - self._Pr[s, a]]))
         return entropy(self._T[s, a, :])
 
-    def __combine_C__(self, **kwargs) -> np.ndarray | float:
+    def __combine_C__(self, **kwargs) -> Union[np.ndarray, float]:
         """
         Combines the normalized Q and U values based on the pre-defined ratio for state. This will only be used
         to assess the priority of certain updates, that is Q values will be stored and updated in the usual fashion.
