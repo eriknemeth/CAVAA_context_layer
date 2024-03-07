@@ -20,7 +20,7 @@ class SECagent(object):
         self.emb_length = emb        # EMB = embedding length: Size of the state vector
         
         self.sequential_bias = sequential_bias   # sequential bias
-        self.value_function == value_function
+        self.value_function = value_function  # TODO check it, it used to be ==
         self.forget = forget    # can be "FIFO", "SING" or "PROP"
 
         #print("STM length: ", self.stm_length)

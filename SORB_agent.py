@@ -693,7 +693,7 @@ class RLagent:
         return
 
     # Methods used to instruct the agent
-    def choose_action(self, s: int, a_poss: np.ndarray, **kwargs) -> int:
+    def choose_action(self, s: int, a_poss: np.ndarray, **kwargs) -> Tuple[int, float]:
         """
         Chooses actions from the available ones from a predefined state and the set of available actions observed from
         env. The action choice will depend on the decision rule. We might use a softmax function, a greedy choice by Q,
@@ -702,7 +702,7 @@ class RLagent:
         :param a_poss: array of possible actions, given by the env
         :param kwargs:
             virtual: is this a virtual step (True) or a real one (False, default)
-        :return: chosen action
+        :return: chosen action and the associated C-value
         """
         # Let's see what epistemic values we will have to combine (is this a real decision, or a virtual replay?)
         virtual = kwargs.get('virtual', False)
@@ -715,7 +715,7 @@ class RLagent:
             # Simplest case, we choose randomly
             if np.random.uniform(0, 1, 1) <= self._epsilon:
                 a = np.random.choice(a_poss)
-                return int(a)
+                return int(a), self.__combine_C__(s=s, a=a)
 
         # 2) For the other methods combine all the potential constituents
         C_poss = np.array([self.__combine_C__(s=s, a=idx_a, replay=virtual) for idx_a in a_poss])
@@ -725,12 +725,12 @@ class RLagent:
         if self._decision_rule == "softmax":
             p_poss = np.exp(self._beta * C_poss) / np.sum(np.exp(self._beta * C_poss))
             a = np.random.choice(a_poss, p=p_poss)
-            return int(a)
+            return int(a), self.__combine_C__(s=s, a=a)
 
         # 4) If we choose the maximum (either due to greedy or epsilon greedy policies)
         a_poss = a_poss[C_poss == max(C_poss)]
         a = np.random.choice(a_poss)
-        return int(a)
+        return int(a), self.__combine_C__(s=s, a=a)
 
     def model_learning(self, s: int, a: int, s_prime: int, r: float) -> Tuple[float, float]:
         """
@@ -1048,7 +1048,7 @@ class RLagent:
 
         # 2) Save the events
         try:
-            self._events.to_csv(f'{path}agent{label}.csv', sep=',', index=False, encoding='utf-8')
+            self._events.to_csv(f'{path}SORB_agent{label}.csv', sep=',', index=False, encoding='utf-8')
         except AttributeError:
             print('Note: This agent does not store the transpired events, no .csv generated.')
 

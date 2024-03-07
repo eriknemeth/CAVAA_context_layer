@@ -228,7 +228,7 @@ class Env:
         [x, y] = np.argwhere(self._maze == s[0])[0]
         moves = np.array(range(len(self._act)))
         moves = moves[~self._restrict[x, y, :].astype(bool)]
-        return moves.astype(int)
+        return moves.astype(str)
 
     # And receiving communication from the agent
 

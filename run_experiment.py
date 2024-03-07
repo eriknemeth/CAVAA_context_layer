@@ -142,7 +142,9 @@ def spatial_navigation() -> None:
 
     # Running the experiment
     # TODO we have our action space a str here, however the env and the SORB agent use integers. Why is that?
-    for step in tqdm(range(env_params['num_steps'])):
+    step = 0
+    pbar = tqdm(total=env_params['num_runs'])
+    while step < env_params['num_runs']:
         # 2) Choose an action
         poss_moves = env.possible_moves(state)
         action, SEC_winner = META.action_selection(state, poss_moves)
@@ -155,10 +157,17 @@ def spatial_navigation() -> None:
 
         # 5) If the agent reached a reward, send it back to the starting position
         if done:
+            if env_params['use_epochs']:
+                step += 1
+                pbar.update(1)
             state = env.place_agent(env_params['start_pos'])
             META.reset(state)
         else:
             state = new_state
+
+        if not env_params['use_epochs']:
+            step += 1
+            pbar.update(1)
 
         # 6) Change reward location if must
         if step == env_params['rew_change']:

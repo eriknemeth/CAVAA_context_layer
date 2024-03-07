@@ -89,7 +89,7 @@ class metaAgent():
 
         # 1) Teach the MF agent
         # Update SEC's STM based on previous (state,action) couplet
-        self._SEC.update_STM(sa_couplet=[state, self._actions[action]])
+        self._SEC.update_STM(couplet=[state, self._actions[action]])  # TODO changed it to couplet from sa_couplet
         self._SEC.update_sequential_bias()
         self._SEC.update_LTM(reward)
 
