@@ -1,3 +1,4 @@
+import csv
 import random
 import numpy as np
 import pickle as pkl 
@@ -37,24 +38,11 @@ class SECagent(object):
         #print("CL action_space: ", self.action_space)
         #print("action_space type: ", type(self.action_space))
 
-        #self.action = 0 if type(self.action_space != list) else [0, 0]     # can be a list "[0, 0]...[1, 2]" or a integer "0...5"
-        if type(self.action_space) != list:
-            self.action = 0
-            #print("type not list")
-            #self.STM = [[np.zeros(self.emb_length), np.zeros(1)] for _ in range(self.stm_length)] # pl = prototype length (i.e. dimension of the state vector)
-            self.STM = [[[0] * self.emb_length , 0] for i in range(self.stm_length)]
-            #print(self.STM)
-        else:
-            self.action = [0, 0]
-            #print("type list")
-            #self.STM = [[np.zeros(self.emb_length), np.zeros(2)] for _ in range(self.stm_length)] # pl = prototype length (i.e. dimension of the state vector)
-            self.STM = [[[0] * self.emb_length , [0, 0]] for i in range(self.stm_length)]
-            #print(self.STM)
-
+        self.action = 0
         #print("action: ", self.action)
 
         #self.STM = [[np.zeros(self.emb_length), np.zeros(1)] for _ in range(self.stm_length)] # pl = prototype length (i.e. dimension of the state vector)
-        #print(self.STM)
+        self.STM = [[[0] * self.emb_length , 0] for i in range(self.stm_length)]
         self.LTM = [[],[],[]]
         self.memory_full = False 
         self.memory_threshold =  memory_threshold 
@@ -73,7 +61,6 @@ class SECagent(object):
         self.epsilon = epsilon
 
         if load_ltm: self.load_LTM()
-
 
     def choose_action(self, state):
 
@@ -142,21 +129,14 @@ class SECagent(object):
         q_action = q[self.action]
 
         if isinstance(self.action_space, list):
+            print("NOTE: action space is a list")
             self.action = [int(self.action/self.action_space[1]), self.action % self.action_space[1]]
 
         return self.action, q_action
 
-
     def estimate_return(self, state):
-
-        q = 0
-
-        if type(self.action_space) != list:
-            q = np.ones(self.action_space)/self.action_space
-
-        else:
-            #q = np.ones((self.action_space[0]*self.action_space[1])/(self.action_space[0]*self.action_space[1]))
-            q = np.ones(self.action_space[0]*self.action_space[1])/(self.action_space[0]*self.action_space[1])
+        # get the state-action value based on the memories stored in the LTM
+        q = np.ones(self.action_space) / self.action_space
 
         if len(self.LTM[0]) > 0:
 
@@ -165,7 +145,7 @@ class SECagent(object):
                 bias = np.array(self.tr)
                 #print("bias length: ", len(bias[0])) # proportional to sequence's length, n = LTM sequences
 
-            collectors = (1 - (np.sum(np.abs(state - self.LTM[0]), axis=2)) / len(state)) * bias
+            collectors = (1 - (np.sum(np.abs(state - self.LTM[0]), axis=2)) / len([state])) * bias
             #print ("collectors ", collectors) # proportional to sequence's length, n = LTM sequences
 
             # Collector values must be above both thresholds (absolute and relative) to contribute to action.
@@ -183,11 +163,7 @@ class SECagent(object):
                 # choose collector info about the actions selected (that take euclidean distance of current state and collector's selected states)
                 collectors = collectors[self.selected_actions_indx]
 
-                #m = self.get_policy_from_int(actions, collectors, rewards, distances) if type(self.action_space != list) else self.get_policy_from_list(actions, collectors, rewards, distances)
-                if type(self.action_space) != list:
-                    q = self.get_policy_from_int(actions, collectors, rewards, distances)
-                else:
-                    q = self.get_policy_from_list(actions, collectors, rewards, distances)
+                q = self.get_policy(actions, collectors, rewards, distances)
 
                 # compute entropy over the policy
                 self.compute_entropy(q)
@@ -197,11 +173,10 @@ class SECagent(object):
 
         return q
 
-
-    def get_policy_from_int(self, actions, collectors, rewards, distances):
+    def get_policy(self, actions, collectors, rewards, distances):
         # map each selected action-vector into a matrix of N dimensions where N are the dimensions of the action space
         m = np.zeros((len(actions), self.action_space))
-        m[np.arange(len(actions)), actions[:].astype(int)] = collectors*(rewards*np.exp(-distances/self.tau_decay))
+        #m[np.arange(len(actions)), actions[:].astype(int)] = collectors*(rewards*np.exp(-distances/self.tau_decay))
 
         if self.value_function == 'default':
             #print('COMPUTING ACTIONS CLASSIC SEC...')
@@ -225,18 +200,18 @@ class SECagent(object):
             #print('COMPUTING ACTIONS WITH ONLY RELATIVE REWARD...')
             m[np.arange(len(actions)), actions[:].astype(int)] = rewards
 
-        m = np.sum(m, axis=0)
-        #m = m + np.abs(m.min())+1 # NEW
-        m = m/m.sum()  #proportion of being selected based on the action's relative reward based on the stored experiences
+        q = np.sum(m, axis=0)
+        #q = q + np.abs(q.min())+1 # NEW
+        q = q/q.sum()  #proportion of being selected based on the action's relative reward based on the stored experiences
+        
         ### TO TEST CHANGE RELATIVE REWARD FOR SOFTMAX FOR ENVS WITH NEGATIVE REWARDS
-        # m = np.softmax(m)
-        # m = np.exp(m - np.max(m)) / np.exp(m - np.max(m)).sum()  -- sofmax function corrected for large numbers
-        # m = np.exp(m) / np.exp(m).sum()  -- sofmax function unstable for large numbers
+        # q = np.softmax(q)
+        # q = np.exp(q - np.max(q)) / np.exp(q - np.max(m)).sum()  -- sofmax function corrected for large numbers
+        # q = np.exp(q) / np.exp(q).sum()  -- sofmax function unstable for large numbers
 
-        q = m.flatten()
+        q = q.flatten()
 
         return q
-
 
     def get_policy_from_list(self, actions, collectors, rewards, distances):
         # map each selected action-vector into a matrix of N dimensions where N are the dimensions of the action space
@@ -272,6 +247,32 @@ class SECagent(object):
         q = m.flatten()
 
         return q
+
+    def compute_q_table(self):
+        # Step 1: Retrieve all unique states experienced from LTM
+        unique_states = np.unique(self.LTM[0])
+        print("unique_states:", unique_states)
+
+        # Step 2: Compute Q values for each state using the estimate_return() function
+        q_values = {}
+        for state in unique_states:
+            q_values[state] = self.estimate_return(state)
+
+        # Step 3: Save the maximum value of the resulting q values for each state in a new table
+        max_q_values = {}
+        for state, q_value in q_values.items():
+            max_q_values[state] = np.max(q_value)
+
+        # Step 4: Save the max_q table into a csv file
+        self.save_max_q_values(max_q_values, 'max_q_values.csv')
+
+    def save_max_q_values(self, max_q_values, filename):
+        with open(filename, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['State', 'Max_Q_Value'])
+            for state, max_q_value in max_q_values.items():
+                writer.writerow([state, max_q_value])
+        print("Max Q values saved to", filename)
 
     def compute_entropy(self, policy):
         # Entropy of the prob distr for policy stability. (The sum of the % distribution multiplied by the logarithm -in base 2- of p)
@@ -358,6 +359,7 @@ class SECagent(object):
             self.selected_actions_indx.append(np.zeros(self.stm_length, dtype='bool').tolist())
             self.last_actions_indx.append(np.zeros(self.stm_length, dtype='bool').tolist())
             #print("Sequences in LTM", len(self.LTM[2]), ", Sequence length:", len(self.STM))
+            self.compute_q_table()
 
     def check_LTM_space(self):
         # Remove sequences when LTM is full
@@ -371,36 +373,36 @@ class SECagent(object):
                 self.forget_LTM()
 
     def forget_LTM(self):
-            if self.forget == "FIFO":
-                self.LTM[0] = np.delete(np.array(self.LTM[0]),0,0).tolist()
-                self.LTM[1] = np.delete(np.array(self.LTM[1]),0,0).tolist()
-                self.LTM[2] = np.delete(np.array(self.LTM[2]),0,0).tolist()
-                self.tr = np.delete(np.array(self.tr),0,0).tolist()
-                self.selected_actions_indx = np.delete(np.array(self.selected_actions_indx),0,0).tolist()
-                self.last_actions_indx = np.delete(np.array(self.last_actions_indx),0,0).tolist()
-                #print ("FIRST MEMORY SEQUENCE FORGOTTEN")
-                #print ("UPDATED LTM rewards: ", self.LTM[2])
-            elif self.forget == "SING":
-                idx = np.argsort(self.LTM[2])
-                self.LTM[0] = np.delete(np.array(self.LTM[0]),idx[0],0).tolist()
-                self.LTM[1] = np.delete(np.array(self.LTM[1]),idx[0],0).tolist()
-                self.LTM[2] = np.delete(np.array(self.LTM[2]),idx[0],0).tolist()
-                self.tr = np.delete(np.array(self.tr),idx[0],0).tolist()
-                self.selected_actions_indx = np.delete(np.array(self.selected_actions_indx),idx[0],0).tolist()
-                self.last_actions_indx = np.delete(np.array(self.last_actions_indx),idx[0],0).tolist()
-                #print ("LOWEST REWARD SEQUENCE FORGOTTEN")
-                #print ("UPDATED LTM rewards: ", self.LTM[2])
-            elif self.forget == "PROP":
-                maxfgt = int(len(self.LTM[2]) * self.forget_ratio)
-                idx = np.argsort(self.LTM[2])
-                self.LTM[0] = np.delete(np.array(self.LTM[0]),idx[0:maxfgt],0).tolist()
-                self.LTM[1] = np.delete(np.array(self.LTM[1]),idx[0:maxfgt],0).tolist()
-                self.LTM[2] = np.delete(np.array(self.LTM[2]),idx[0:maxfgt],0).tolist()
-                self.tr = np.delete(np.array(self.tr),idx[0:maxfgt],0).tolist()
-                self.selected_actions_indx = np.delete(np.array(self.selected_actions_indx),idx[0:maxfgt],0).tolist()
-                self.last_actions_indx = np.delete(np.array(self.last_actions_indx),idx[0:maxfgt],0).tolist()
-                #print ("NUMBER OF FORGOTTEN SEQUENCES: ", maxfgt)
-                #print ("UPDATED LTM rewards: ", self.LTM[2])
+        if self.forget == "FIFO":
+            self.LTM[0] = np.delete(np.array(self.LTM[0]),0,0).tolist()
+            self.LTM[1] = np.delete(np.array(self.LTM[1]),0,0).tolist()
+            self.LTM[2] = np.delete(np.array(self.LTM[2]),0,0).tolist()
+            self.tr = np.delete(np.array(self.tr),0,0).tolist()
+            self.selected_actions_indx = np.delete(np.array(self.selected_actions_indx),0,0).tolist()
+            self.last_actions_indx = np.delete(np.array(self.last_actions_indx),0,0).tolist()
+            #print ("FIRST MEMORY SEQUENCE FORGOTTEN")
+            #print ("UPDATED LTM rewards: ", self.LTM[2])
+        elif self.forget == "SING":
+            idx = np.argsort(self.LTM[2])
+            self.LTM[0] = np.delete(np.array(self.LTM[0]),idx[0],0).tolist()
+            self.LTM[1] = np.delete(np.array(self.LTM[1]),idx[0],0).tolist()
+            self.LTM[2] = np.delete(np.array(self.LTM[2]),idx[0],0).tolist()
+            self.tr = np.delete(np.array(self.tr),idx[0],0).tolist()
+            self.selected_actions_indx = np.delete(np.array(self.selected_actions_indx),idx[0],0).tolist()
+            self.last_actions_indx = np.delete(np.array(self.last_actions_indx),idx[0],0).tolist()
+            #print ("LOWEST REWARD SEQUENCE FORGOTTEN")
+            #print ("UPDATED LTM rewards: ", self.LTM[2])
+        elif self.forget == "PROP":
+            maxfgt = int(len(self.LTM[2]) * self.forget_ratio)
+            idx = np.argsort(self.LTM[2])
+            self.LTM[0] = np.delete(np.array(self.LTM[0]),idx[0:maxfgt],0).tolist()
+            self.LTM[1] = np.delete(np.array(self.LTM[1]),idx[0:maxfgt],0).tolist()
+            self.LTM[2] = np.delete(np.array(self.LTM[2]),idx[0:maxfgt],0).tolist()
+            self.tr = np.delete(np.array(self.tr),idx[0:maxfgt],0).tolist()
+            self.selected_actions_indx = np.delete(np.array(self.selected_actions_indx),idx[0:maxfgt],0).tolist()
+            self.last_actions_indx = np.delete(np.array(self.last_actions_indx),idx[0:maxfgt],0).tolist()
+            #print ("NUMBER OF FORGOTTEN SEQUENCES: ", maxfgt)
+            #print ("UPDATED LTM rewards: ", self.LTM[2])
 
     def get_memory_length(self):
         # In single memory units
@@ -425,3 +427,111 @@ class SECagent(object):
             self.tr.append(np.ones(self.stm_length).tolist())
             self.selected_actions_indx.append(np.zeros(self.stm_length, dtype='bool').tolist())
             self.last_actions_indx.append(np.zeros(self.stm_length, dtype='bool').tolist())
+
+    # All about saving
+    def toggle_save(self, **kwargs) -> None:
+        """
+        Toggles save. If the agent was saving its status so far, it sops doing so. Otherwise, it begins to do so,
+        by already storing a snapshot of the current state as well.
+        Important to note that this function can also be called to extend the saved table in case a new state is
+        encountered.
+        :param kwargs:
+            save_on: If instead of toggling, we want to make sure to turn it on [True] or off [False], we can
+        :return:
+        """
+        save_on = kwargs.get('save_on', not self._save_agent)
+        if save_on:
+            try:
+                try:
+                    s = self._states[-1]  # We need to make it understandable for the environment
+                except AttributeError:
+                    s = self._nS - 1
+                if f'Q_{s}_0' not in self._events.columns:  # We added a new state
+                    for s_idx in range(self._nS):
+                        for a_idx in range(self._nA):
+                            try:
+                                s = self._states[s_idx]  # We need to make it understandable for the environment
+                            except AttributeError:
+                                s = s_idx
+                            if f'Q_{s}_{a_idx}' not in self._events.columns:
+                                self._events[f'Q_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
+                                self._events[f'Ur_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
+                                self._events[f'Ut_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
+                                self._events[f'C_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
+
+            except AttributeError:  # There is no such thing as _events
+                poss_states = range(self._nS)
+                try:
+                    poss_states = self._states  # Thus we won't need to translate
+                except AttributeError:
+                    pass
+                Q_names = [f'Q_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
+                Ur_names = [f'Ur_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
+                Ut_names = [f'Ut_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
+                C_names = [f'C_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
+                self._events = pd.DataFrame(columns=['iter', 'step', 's', 'u', 's_prime', 'r', 'hr', 'ht', 'deltaC',
+                                                     *Q_names, *Ur_names, *Ut_names, *C_names])
+            if not self._save_agent:
+                self._save_agent = True
+                self.__save_step__(True)  # If we just turned it on, we take a snapshot of the agent's current state
+        else:
+            self._save_agent = False
+
+    def dump_agent(self, **kwargs) -> None:
+        """
+        Saves everything that we have stored into 2 different files: one for the agent, and one for the events.
+        :param kwargs:
+            path: [str] the path to save the document. If no path is defined then the current working folder will be
+                used
+            label: [str] an additional label to add at the end of the output file name.
+        :return:
+        """
+        path = kwargs.get('path', None)
+        if path is not None:
+            if path[-1] != '/':
+                path = f'{path}/'
+            if not os.path.isdir(path):
+                os.mkdir(path)
+        else:
+            path = './'
+        label = kwargs.get('label', None)
+        if label is not None:
+            label = f'_{label}'
+        else:
+            label = ''
+
+        # 1) Save the whole agent
+        # file = open(f'{path}agent{label}.txt', 'wb')
+        # pickle.dump(self.__dict__, file, 2)
+        # file.close()
+
+        # 2) Save the events
+        try:
+            self._events.to_csv(f'{path}SORB_agent{label}.csv', sep=',', index=False, encoding='utf-8')
+        except AttributeError:
+            print('Note: This agent does not store the transpired events, no .csv generated.')
+
+    def load_agent(self, file_name: str, **kwargs):
+        """
+        Loads a previously saved agent
+        :param file_name: the name of the environment file [txt]
+        :param kwargs:
+            path: path to the file. If nothing is specified we'll be looking in the working folder
+        :return:
+        """
+        path = kwargs.get('path', None)
+        if path is not None:
+            if path[-1] != '/':
+                path = f'{path}/'
+            if not os.path.isdir(path):
+                raise FileNotFoundError(f'No directory named {path}')
+        else:
+            path = './'
+
+        if os.path.isfile(f'{path}{file_name}'):
+            file = open(f'{path}{file_name}', 'rb')
+            tmp_dict = pickle.load(file)
+            file.close()
+            self.__dict__.update(tmp_dict)
+        else:
+            raise FileNotFoundError(f'No file named {file_name}')

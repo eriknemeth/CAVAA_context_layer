@@ -64,6 +64,8 @@ class metaAgent():
         decoded_state = self.__decode_state__(state)
         action_SORB, Q_SORB = self._SORB.choose_action(decoded_state, poss_moves)
 
+        return action_SEC, True
+
         # 3) Compare results
         if Q_SEC >= Q_SORB:
             return action_SEC, True
