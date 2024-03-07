@@ -3,14 +3,12 @@ from tqdm import tqdm
 from meta_agent import *
 import re
 
-def experiment_plotter(path: str, env_file: str, agent_file: str, **kwargs):
+def experiment_plotter(path: str, env_file: str, agent_file: str):
     """
     Plots the data gathered from a specific experiment
     :param path: path to the experimental data
     :param env_file: name of the environment file [.txt]
     :param agent_file: name of the agent events file [.csv]
-    :param kwargs:
-        weights: weights to combine the Q, Ur and Ut values into C-values [np.ndarray]
     :return:
     """
     dTm = PlotterEnv(env_file, path=path)
@@ -28,7 +26,7 @@ def spatial_navigation() -> None:
     # TODO rewise these parameters, potentially adaptively, and replace the test environment
     env_params = dict()
     steps = 1000
-    env_params['actions'] = ['0', '1', '2', '3']
+    env_params['actions'] = [0, 1, 2, 3]
 
     # About saving
     env_params['save_data'] = True  # -------------------- Should I even save at all

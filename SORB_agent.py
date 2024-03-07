@@ -681,7 +681,7 @@ class RLagent:
                 event[f'Q_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 0]]
                 event[f'Ur_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 1]]
                 event[f'Ut_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 2]]
-                event[f'C_{s}_{a_idx}'] = [self.__combine_C__(s=s, a=a_idx)]
+                event[f'C_{s}_{a_idx}'] = [self.__combine_C__(s=s_idx, a=a_idx)]
 
         # 3) Add it to the table
         events_temp = pd.DataFrame.from_dict(event).fillna(value=np.nan)

@@ -228,11 +228,11 @@ class Env:
         [x, y] = np.argwhere(self._maze == s[0])[0]
         moves = np.array(range(len(self._act)))
         moves = moves[~self._restrict[x, y, :].astype(bool)]
-        return moves.astype(str)
+        return moves.astype(int)
 
     # And receiving communication from the agent
 
-    def step(self, s: np.ndarray, a: str) -> Tuple[np.ndarray, float, bool]:
+    def step(self, s: np.ndarray, a: int) -> Tuple[np.ndarray, float, bool]:
         """
         Performs a step from state s (as per designated by the agent), taking action a (as per chosen in advance), and
         returns the observed outcome.
@@ -250,7 +250,7 @@ class Env:
         self._agent_pos[x, y] = 0
 
         # Then see where we land
-        [x_prime, y_prime] = self.__next_state__(x, y, int(a))
+        [x_prime, y_prime] = self.__next_state__(x, y, a)
 
         # If we were to go out of bounds, or bump into a wall, stay in place instead:
         if self.__check_out_of_bounds__(x_prime, y_prime):
@@ -644,21 +644,21 @@ class PlotterEnv(Env):
             # As for the H values, some actions (namely the forbidden ones) will never be explored by the agent. Thus
             # instead of storing all H values from the table, we only store those that the agent had a chance to learn
             if f'Ur_{s_idx}_0' in self._agent_events.columns:
-                cols = [f'Ur_{s_idx}_{a_idx}' for a_idx in self.possible_moves(s_idx)]
+                cols = [f'Ur_{s_idx}_{a_idx}' for a_idx in self.possible_moves(np.array([s_idx]))]
                 Ur_vals[f'Ur_{s_idx}'] = self._agent_events[cols].max(axis=1)
             else:
                 Ur_vals[f'Ur_{s_idx}'] = pd.DataFrame(empty_arr,
                                                       columns=[f'Ur_{s_idx}'])
 
             if f'Ut_{s_idx}_0' in self._agent_events.columns:
-                cols = [f'Ut_{s_idx}_{a_idx}' for a_idx in self.possible_moves(s_idx)]
+                cols = [f'Ut_{s_idx}_{a_idx}' for a_idx in self.possible_moves(np.array([s_idx]))]
                 Ut_vals[f'Ut_{s_idx}'] = self._agent_events[cols].max(axis=1)
             else:
                 Ut_vals[f'Ut_{s_idx}'] = pd.DataFrame(empty_arr,
                                                       columns=[f'Ut_{s_idx}'])
 
             if f'C_{s_idx}_0' in self._agent_events.columns:
-                cols = [f'C_{s_idx}_{a_idx}' for a_idx in self.possible_moves(s_idx)]
+                cols = [f'C_{s_idx}_{a_idx}' for a_idx in self.possible_moves(np.array([s_idx]))]
                 C_vals[f'C_{s_idx}'] = self._agent_events[cols].max(axis=1)
             else:
                 C_vals[f'C_{s_idx}'] = pd.DataFrame(empty_arr,
