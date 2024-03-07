@@ -784,7 +784,7 @@ class RLagent:
             self._C[s_prime, :, 1:] = 0
         return hr, ht
 
-    def inference(self, s: int, a: int, s_prime: int, rew: np.ndarray, **kwargs) -> float:
+    def inference(self, s: int, a: int, s_prime: int, rew: np.ndarray, **kwargs) -> bool:
         """
         Overwrites the parent class's method. Uses TDE to actualy update the Q values
         :param s: current state label
@@ -796,7 +796,7 @@ class RLagent:
                 forward and backward replay or trsam we don't want to update the memory buffer
             virtual: is this a virtual step [True] or a real one [False, default] -- will decide if we'll learn epist
                 values from it, and *in case we update the buffer*, do we add predecessors to it
-        :return: the (combined) delta Q
+        :return: whether we replayed or not
         """
         # Let's see what situation we're in (real step or virtual, do we update the buffer or not)
         update_buffer = kwargs.get('update_buffer', True)
@@ -837,7 +837,13 @@ class RLagent:
         # Saving the step in a table
         self.__save_step__(virtual, s=s, a=a, s_prime=s_prime, rew=rew, deltaC=delta_C)
 
-        return delta_C
+        # Performing memory replay
+        replayed = False
+        if not virtual and self._replay_type in ['forward', 'backward', 'priority'] and abs(delta_C) > self._replay_thresh:
+            self.memory_replay(s=s)
+            replayed = True
+
+        return replayed
 
     def memory_replay(self, **kwargs) -> None:
         """

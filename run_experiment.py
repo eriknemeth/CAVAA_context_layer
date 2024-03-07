@@ -93,7 +93,7 @@ def spatial_navigation() -> None:
         SORB_params['save_tag'] = None  # ------------------- What tag should I put on saved data
 
     # About the agent
-    SORB_params['act_num'] = 4  # --------------------------- Size of action space # TODO make it adaptive
+    SORB_params['act_num'] = len(SORB_params['actions'])  # - Size of action space # TODO make it adaptive
     SORB_params['known_env'] = False  # --------------------- Is the environment known in advance
     SORB_params['model_type'] = 'VI'  # --------------------- 'VI' value iteration or 'TD' temporal difference
     if SORB_params['model_type'] == 'TD':
@@ -124,7 +124,6 @@ def spatial_navigation() -> None:
                  slip_prob=env_params['slip_prob'])
 
     # 1) Get the first state
-    # TODO need env or obtain 1st state
     env.place_reward(env_params['rew_loc'],
                      env_params['rew_val'],
                      env_params['rew_prob'])
@@ -142,7 +141,7 @@ def spatial_navigation() -> None:
         META.toggle_save()
 
     # Running the experiment
-    # TODO there is a mismatch between the expected and received state and action types
+    # TODO we have our action space a str here, however the env and the SORB agent use integers. Why is that?
     for step in tqdm(range(env_params['num_steps'])):
         # 2) Choose an action
         poss_moves = env.possible_moves(state)
@@ -157,7 +156,7 @@ def spatial_navigation() -> None:
         # 5) If the agent reached a reward, send it back to the starting position
         if done:
             state = env.place_agent(env_params['start_pos'])
-            META.reset()
+            META.reset(state)
         else:
             state = new_state
 

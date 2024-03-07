@@ -208,15 +208,15 @@ class Env:
 
     # Communication towards the agent
 
-    def curr_state(self) -> int:
+    def curr_state(self) -> np.ndarray:
         """
         Returns the current state (as per understood by the agent) of the agent
 
         :return: current state of the agent
         """
-        return self._maze[self._agent_pos.astype(bool)][0]
+        return np.array([self._maze[self._agent_pos.astype(bool)][0]])
 
-    def possible_moves(self, s: int) -> np.ndarray:
+    def possible_moves(self, s: np.ndarray) -> np.ndarray:
         """
         Given a state of query, it computes all the possible available actions, taking into consideration whether
         movement is restricted or not, and whether the agent can try and bump into walls or not
@@ -225,14 +225,14 @@ class Env:
         :return: a numpy array of possible actions to choose from (labels follow those of self._act)
         """
 
-        [x, y] = np.argwhere(self._maze == s)[0]
+        [x, y] = np.argwhere(self._maze == s[0])[0]
         moves = np.array(range(len(self._act)))
         moves = moves[~self._restrict[x, y, :].astype(bool)]
         return moves.astype(int)
 
     # And receiving communication from the agent
 
-    def step(self, s: int, a: int) -> Tuple[int, float, bool]:
+    def step(self, s: np.ndarray, a: str) -> Tuple[np.ndarray, float, bool]:
         """
         Performs a step from state s (as per designated by the agent), taking action a (as per chosen in advance), and
         returns the observed outcome.
@@ -246,11 +246,11 @@ class Env:
             this epoch is over
         """
         # Let's remove the agent from the starting state
-        [x, y] = np.argwhere(self._maze == s)[0]
+        [x, y] = np.argwhere(self._maze == s[0])[0]
         self._agent_pos[x, y] = 0
 
         # Then see where we land
-        [x_prime, y_prime] = self.__next_state__(x, y, a)
+        [x_prime, y_prime] = self.__next_state__(x, y, int(a))
 
         # If we were to go out of bounds, or bump into a wall, stay in place instead:
         if self.__check_out_of_bounds__(x_prime, y_prime):
@@ -274,9 +274,9 @@ class Env:
 
         # Saving
         self.__save_step__()
-        return s_prime, rew, rew > 0
+        return np.array([s_prime]), rew, rew > 0
 
-    def place_reward(self, reward_state: int, reward_val: float, reward_prob: float) -> None:
+    def place_reward(self, reward_state: np.ndarray, reward_val: np.ndarray, reward_prob: np.ndarray) -> None:
         """
         Places the reward.
         :param reward_state: Where this reward should be placed (state-space representation)
@@ -284,11 +284,12 @@ class Env:
         :param reward_prob: Probability of said reward
         :return: -
         """
-        [x, y] = np.argwhere(self._maze == reward_state)[0]
-        # Where is the reward and how big is it?
-        self._reward[x, y] = reward_val
-        # What is the likelihood of getting a reward
-        self._reward_prob[x, y] = reward_prob
+        for rew_idx in range(len(reward_state)):
+            [x, y] = np.argwhere(self._maze == reward_state[rew_idx])[0]
+            # Where is the reward and how big is it?
+            self._reward[x, y] = reward_val[rew_idx]
+            # What is the likelihood of getting a reward
+            self._reward_prob[x, y] = reward_prob[rew_idx]
 
         # Call the toggle_save, because in case we are saving, adding a new reward means we need to extend the storage
         self.toggle_save(save_on=self._save_env)
@@ -304,7 +305,7 @@ class Env:
         self._reward_prob = np.zeros(self._maze.shape)
         return
 
-    def place_agent(self, init_state: int) -> int:
+    def place_agent(self, init_state: int) -> np.ndarray:
         """
         A function to place the agent onto state init_state. If saving is on this function will overwrite the location
         of the agent in the last row of the memory.
@@ -319,7 +320,7 @@ class Env:
 
         # Take care of saving by overwriting the last element
         self.__overwrite_step__(x, y)
-        return init_state
+        return np.array([init_state])
 
     # About saving
     def toggle_save(self, **kwargs) -> None:

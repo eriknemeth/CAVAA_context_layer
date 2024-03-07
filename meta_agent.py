@@ -2,8 +2,8 @@ import numpy as np
 
 from SORB_agent import *
 
+from SECS_agent import *
 
-from SEC_agent import *
 
 class metaAgent():
     """
@@ -12,6 +12,7 @@ class metaAgent():
 
     def __init__(self, SEC_params: dict, SORB_params: dict) -> None:
         self._replay_thresh = SORB_params['replay_thresh']
+        self._plan = SORB_params['replay_type'] in ['trsam', 'bidir']
         self._actions = {SORB_params['actions'][idx]: int(idx) for idx in range(len(SORB_params['actions']))}
         self._states = np.array([[SORB_params['curr_state']]])
         SORB_params['curr_state'] = self.__decode_state__(SORB_params['curr_state'])
@@ -57,7 +58,6 @@ class metaAgent():
             True if we used the MF agent, False if we used the MB agent
         """
         # 1) MF action selection
-        # action_SEC, Q_SEC = self.MF.action_selection(state)
         action_SEC, Q_SEC = self._SEC.choose_action(state)
 
         # 2) MB action selection
@@ -97,22 +97,19 @@ class metaAgent():
         decoded_state = self.__decode_state__(state)
         decoded_new_state = self.__decode_state__(new_state)
         hr, ht = self._SORB.model_learning(decoded_state, self._actions[action], decoded_new_state, reward)
-        delta_C = self._SORB.inference(decoded_state, self._actions[action], decoded_new_state,
-                                       np.array([hr, ht, reward]))
-        # TODO we might want to perform the inference exclusively at the beginning of a trial!
-        replayed = False
-        if self._replay_thresh is not None and abs(delta_C) > self._replay_thresh:
-            self._SORB.memory_replay(s=decoded_state)
-            replayed = True
+        replayed = self._SORB.inference(decoded_state, self._actions[action], decoded_new_state,
+                                        np.array([hr, ht, reward]))
 
         # 3) Return
         return replayed
 
-    def reset(self) -> None:
+    def reset(self, state) -> None:
         """
         Reset the short-term memory of the MF agent
         """
         self._SEC.reset_memory()
+        if self._plan:
+            self._SORB.memory_replay(s=state)
 
     def toggle_save(self):
         """
