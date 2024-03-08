@@ -703,7 +703,7 @@ class RLagent:
             # Simplest case, we choose randomly
             if np.random.uniform(0, 1, 1) <= self._epsilon:
                 a = np.random.choice(a_poss)
-                return int(a), self.__combine_C__(s=s, a=a)
+                return int(a), self._C[s, a, 0] #  self.__combine_C__(s=s, a=a)
 
         # 2) For the other methods combine all the potential constituents
         C_poss = np.array([self.__combine_C__(s=s, a=idx_a, replay=virtual) for idx_a in a_poss])
@@ -713,12 +713,12 @@ class RLagent:
         if self._decision_rule == "softmax":
             p_poss = np.exp(self._beta * C_poss) / np.sum(np.exp(self._beta * C_poss))
             a = np.random.choice(a_poss, p=p_poss)
-            return int(a), self.__combine_C__(s=s, a=a)
+            return int(a), self._C[s, a, 0] #  self.__combine_C__(s=s, a=a)
 
         # 4) If we choose the maximum (either due to greedy or epsilon greedy policies)
         a_poss = a_poss[C_poss == max(C_poss)]
         a = np.random.choice(a_poss)
-        return int(a), self.__combine_C__(s=s, a=a)
+        return int(a), self._C[s, a, 0] #  self.__combine_C__(s=s, a=a)
 
     def model_learning(self, s: np.ndarray, a: int, s_prime: np.ndarray, r: float) -> Tuple[float, float]:
         """

@@ -43,7 +43,7 @@ def spatial_navigation() -> None:
     env_params['num_runs'] = steps  # --------------------- How many steps do we model
     env_params['rew_change'] = None  # -------------------- When do we change the reward location (if we do)
     env_params['rew_loc'] = np.array([[4, 0], [1, 8]])  # - What is (are) the rewarded state(s)
-    env_params['rew_val'] = np.array([[5], [1]])  # ------- What is (are) the value(s) of the reward(s)
+    env_params['rew_val'] = np.array([[1], [5]])  # ------- What is (are) the value(s) of the reward(s)
     env_params['rew_prob'] = np.array([[1], [1]])  # ------ What is (area) the probability/ies of the reward(s)
     env_params['new_rew_loc'] = None  # ------------------- What is (are) the rewarded state(s)
     env_params['new_rew_val'] = None  # ------------------- What is (are) the value(s) of the reward(s)
@@ -113,7 +113,7 @@ def spatial_navigation() -> None:
     if SORB_params['replay_type'] in ['priority', 'bidir']:
         SORB_params['event_handle'] = 'sa'  # --------------- What is each new memory compared to [s, sa, sas]
     SORB_params['event_content'] = 'sas'  # ----------------- What is not estimated from model [s, sa, sas, sasr]
-    SORB_params['replay_thresh'] = 0.02  # ------------------ Smallest surprise necessary to initiate replay
+    SORB_params['replay_thresh'] = 0.1  # ------------------ Smallest surprise necessary to initiate replay
     SORB_params['max_replay'] = 50  # ----------------------- Max replay steps per replay event
     SORB_params['add_predecessors'] = 'both'  # ------------- When should I add predecessors (None, act, rep or both)
     SORB_params['forbidden_walls'] = False  # --------------- If we replay (simulate), is bumping into a wall forbidden?
@@ -154,7 +154,7 @@ def spatial_navigation() -> None:
         action, SEC_winner = META.action_selection(state, poss_moves)
 
         # 3) Commit to action
-        new_state, reward, done = env.step(state, action)
+        new_state, reward, done = env.step(state, action, SEC_winner)
 
         # 4) Learn
         replayed = META.learning(state, action, new_state, reward)

@@ -35,8 +35,6 @@ class metaAgent():
         # 2) MB action selection
         action_SORB, Q_SORB = self._SORB.choose_action(state, poss_moves)
 
-        return action_SEC, True
-
         # 3) Compare results
         if Q_SEC >= Q_SORB:
             return action_SEC, True
@@ -63,7 +61,7 @@ class metaAgent():
 
         # 2) Teach the MB agents
         hr, ht = self._SORB.model_learning(state, action, new_state, reward)
-        replayed = self._SORB.inference(state, action, new_state, np.array([hr, ht, reward]))
+        replayed = self._SORB.inference(state, action, new_state, np.array([reward, hr, ht]))
 
         # 3) Return
         return replayed

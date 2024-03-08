@@ -118,7 +118,7 @@ class Env:
 
         return np.array([x_fin, y_fin]).astype(int)
 
-    def __save_step__(self) -> None:
+    def __save_step__(self, SEC_winner: bool) -> None:
         """
         Saves the current state of the maze by adding a row to the _events memory.
         :return:
@@ -137,6 +137,7 @@ class Env:
         agent = np.argwhere(self._agent_pos == 1)
         event['agent_pos_x'] = [agent[0, 0]]
         event['agent_pos_y'] = [agent[0, 1]]
+        event['SEC_winner'] = SEC_winner
         rewards = np.argwhere(self._reward > 0)
         for rew_idx in range(rewards.shape[0]):
             event[f'rew{rew_idx}_pos_x'] = [rewards[rew_idx, 0]]
@@ -234,7 +235,7 @@ class Env:
 
     # And receiving communication from the agent
 
-    def step(self, s: np.ndarray, a: int) -> Tuple[np.ndarray, float, bool]:
+    def step(self, s: np.ndarray, a: int, SEC_winner: bool) -> Tuple[np.ndarray, float, bool]:
         """
         Performs a step from state s (as per designated by the agent), taking action a (as per chosen in advance), and
         returns the observed outcome.
@@ -275,7 +276,7 @@ class Env:
         #     s_prime = self._maze[x, y]
 
         # Saving
-        self.__save_step__()
+        self.__save_step__(SEC_winner)
         # return np.array([s_prime]), rew, rew > 0
         return np.array([x_prime, y_prime]), rew, rew > 0
 
@@ -351,10 +352,10 @@ class Env:
             except AttributeError:  # There is no such thing as _events yet
                 col_names = [f'rew{variable_num}_{variable_name}' for variable_num in range(np.sum(self._reward > 0))
                              for variable_name in ['pos_x', 'pos_y', 'val', 'proba']]
-                self._events = pd.DataFrame(columns=['iter', 'agent_pos_x', 'agent_pos_y', *col_names])
+                self._events = pd.DataFrame(columns=['iter', 'agent_pos_x', 'agent_pos_y', 'SEC_winner', *col_names])
             if not self._save_env:
                 self._save_env = True
-                self.__save_step__()
+                self.__save_step__(False)
         else:
             self._save_env = False
 
@@ -577,7 +578,7 @@ class PlotterEnv(Env):
         :param it: the iteration we are in
         :return:
         """
-        # wall = 0, path = 1, reward = 2, agent = 3
+        # wall = 0, path = 1, reward = 2, SEC_agent = 4, SORB_agent = 6
         image = np.zeros(self._maze.shape)
         image[self._maze >= 0] = 1
         reward_num = int((self._events.shape[1] - 3) / 4)
@@ -585,7 +586,10 @@ class PlotterEnv(Env):
             if self._events[f'rew{rew_idx}_pos_x'].iloc[it] >= 0:
                 image[int(self._events[f'rew{rew_idx}_pos_x'].iloc[it]),
                 int(self._events[f'rew{rew_idx}_pos_y'].iloc[it])] = 2
-        image[int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])] = 3
+        if self._events['SEC_winner'].iloc[it]:
+            image[int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])] = 4
+        else:
+            image[int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])] = 6
         return image
 
     def __replay_to_image__(self, curr_image: np.ndarray, row_idx: int) -> np.ndarray:
@@ -743,7 +747,7 @@ class PlotterEnv(Env):
                     [int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])]:
                 # and self._agent_events['s_prime'].iloc[row_idx] != \
                 # self._maze[int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])]:
-                raise ValueError("mismatch between agent and environment memory")
+                raise ValueError(f"mismatch between agent and environment memory in row {row_idx}, iter {it}, step{step}")
 
             # 2.b) Else we have to see if we perform replay or not
             if step > 0:
