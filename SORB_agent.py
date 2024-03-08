@@ -29,7 +29,7 @@ class RLagent:
     its memory.
     """
 
-    def __init__(self, act_num: int, curr_state: int, model_type: str, gamma: float, kappa: float, decision_rule: str, **kwargs):
+    def __init__(self, act_num: int, curr_state: np.ndarray, model_type: str, gamma: float, kappa: float, decision_rule: str, **kwargs):
         """
         Constructor for the basic instance of a Reinforcement Learning Agent.
         Exceptions: ValueError, if the str parameters are invalid
@@ -179,7 +179,7 @@ class RLagent:
         return
 
     # Methods related to the inner workings of the agent
-    def __translate_s__(self, s: int) -> Union[int, None]:
+    def __translate_s__(self, s: np.ndarray) -> Union[int, None]:
         """
         Translates s into labels recognized by the agent (in case of automatically increasing state space)
         :param s: the state as detected from the environment
@@ -188,7 +188,8 @@ class RLagent:
         if s is None:
             return s
         try:
-            return np.argwhere(self._states == s)[0, 0]
+            # return np.argwhere(self._states == s)[0, 0]
+            return np.where((self._states == s).all(axis=1))[0][0]
         except AttributeError:
             return s
 
@@ -380,7 +381,7 @@ class RLagent:
             self._memory_buff[insertion_idx[0], :] = to_store
             return
 
-    def __extend_state_space__(self, s_prime) -> None:
+    def __extend_state_space__(self, s_prime: np.ndarray) -> None:
         """
         Upon encountering a never-before seen state, this function extends the state-space
         :param s_prime: the label of the new state
@@ -733,7 +734,7 @@ class RLagent:
         a = np.random.choice(a_poss)
         return int(a), self.__combine_C__(s=s, a=a)
 
-    def model_learning(self, s: int, a: int, s_prime: int, r: float) -> Tuple[float, float]:
+    def model_learning(self, s: np.ndarray, a: int, s_prime: np.ndarray, r: float) -> Tuple[float, float]:
         """
         Tuning of the agent's model parameters (MF agent will only use it for the computation of the epistemic rewards)
         :param s: current state label
@@ -744,7 +745,7 @@ class RLagent:
         """
         # First we might need to extend the model if s_prime is never before seen and if the environment is unknown
         try:
-            if s_prime not in self._states:
+            if not any(np.equal(self._states, s_prime).all(1)):
                 self.__extend_state_space__(s_prime)
         except AttributeError:
             pass
@@ -785,7 +786,7 @@ class RLagent:
             self._C[s_prime, :, 1:] = 0
         return hr, ht
 
-    def inference(self, s: int, a: int, s_prime: int, rew: np.ndarray, **kwargs) -> bool:
+    def inference(self, s: np.ndarray, a: int, s_prime: np.ndarray, rew: np.ndarray, **kwargs) -> bool:
         """
         Overwrites the parent class's method. Uses TDE to actualy update the Q values
         :param s: current state label
@@ -1004,7 +1005,7 @@ class RLagent:
             except AttributeError:  # There is no such thing as _events
                 poss_states = range(self._nS)
                 try:
-                    poss_states = self._states  # Thus we won't need to translate
+                    poss_states = range(self._states.shape[0])  # Thus we won't need to translate
                 except AttributeError:
                     pass
                 Q_names = [f'Q_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]

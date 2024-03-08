@@ -38,13 +38,13 @@ def spatial_navigation() -> None:
     env_params['use_epochs'] = False  # ------------------- If [True] we use epochs, if [False] we use steps
     env_params['num_runs'] = steps  # --------------------- How many steps do we model
     env_params['rew_change'] = None  # -------------------- When do we change the reward location (if we do)
-    env_params['rew_loc'] = np.array([11, 20])  # --------- What is (are) the rewarded state(s)
-    env_params['rew_val'] = np.array([5, 1])  # ----------- What is (are) the value(s) of the reward(s)
-    env_params['rew_prob'] = np.array([1, 1])  # ---------- What is (area) the probability/ies of the reward(s)
+    env_params['rew_loc'] = np.array([[4, 0], [1, 8]])  # - What is (are) the rewarded state(s)
+    env_params['rew_val'] = np.array([[5], [1]])  # ------- What is (are) the value(s) of the reward(s)
+    env_params['rew_prob'] = np.array([[1], [1]])  # ------ What is (area) the probability/ies of the reward(s)
     env_params['new_rew_loc'] = None  # ------------------- What is (are) the rewarded state(s)
     env_params['new_rew_val'] = None  # ------------------- What is (are) the value(s) of the reward(s)
     env_params['new_rew_prob'] = None  # ------------------ What is (area) the probability/ies of the reward(s)
-    env_params['start_pos'] = 21  # ----------------------- What state do we start from
+    env_params['start_pos'] = np.array([4, 3])  # --------- What state do we start from
     env_params['forbidden_walls'] = False  # -------------- Is it forbidden to bump into walls?
     env_params['restricted_dT'] = False  # ---------------- Is the movement restricted to unidirectional?
     env_params['slip_prob'] = 0  # ------------------------ The probability of slipping after a step
