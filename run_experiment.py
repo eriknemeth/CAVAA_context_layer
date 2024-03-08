@@ -3,17 +3,21 @@ from tqdm import tqdm
 from meta_agent import *
 import re
 
-def experiment_plotter(path: str, env_file: str, agent_file: str):
+
+def experiment_plotter(path: str, env_file: str, SORB_file: str, SECS_file: str):
     """
     Plots the data gathered from a specific experiment
     :param path: path to the experimental data
     :param env_file: name of the environment file [.txt]
-    :param agent_file: name of the agent events file [.csv]
+    :param SORB_file: name of the agent events file [.csv]
+    :param SECS_file: name of the SECS event file [.csv]
     :return:
     """
     dTm = PlotterEnv(env_file, path=path)
-    dTm.load_events(agent_file, 'MB', path=path)
+    dTm.load_events(SORB_file, 'SORB', path=path)
+    dTm.load_events(SECS_file, 'SECS', path=path)
     dTm.plot_events()
+
 
 def spatial_navigation() -> None:
     """
@@ -61,18 +65,21 @@ def spatial_navigation() -> None:
     SEC_params['ltm'] = 250  # default: 50K, test: 10K
 
     SEC_params['sequential_bias'] = True
-    SEC_params['value_function'] = 'noGi'  # value_functions = ['default', 'noGi', 'noDist', 'noRR', 'soloGi', 'soloDist', 'soloRR']
-    SEC_params['forget'] = 'FIFO'  # types = ['FIFO-SING', 'FIFO-PROP', 'RWD-SING', 'RWD-PROP', 'LRU-SING', 'LRU-PROP', 'LRU-PROB'] - default: FIFO-SING
-    
+    SEC_params[
+        'value_function'] = 'noGi'  # value_functions = ['default', 'noGi', 'noDist', 'noRR', 'soloGi', 'soloDist', 'soloRR']
+    SEC_params[
+        'forget'] = 'FIFO'  # types = ['FIFO-SING', 'FIFO-PROP', 'RWD-SING', 'RWD-PROP', 'LRU-SING', 'LRU-PROP', 'LRU-PROB'] - default: FIFO-SING
+
     SEC_params['coll_threshold_act'] = 0.98  # default: 0.98
     SEC_params['coll_threshold_proportion'] = 0.995  # default animalai: 0.995
-    
+
     SEC_params['alpha_trigger'] = 0.05  # default = 0.05
     SEC_params['tau_decay'] = 0.9  # default animalai: 0.9
     SEC_params['load_ltm'] = False
 
     SEC_params['exploration_mode'] = 'default'  # exploration_mode = ['default', 'fixed', 'epsilon', 'epsilon_decay']
-    SEC_params['exploration_steps'] = 150  # THE UNITS ARE NUMBER OF AGENT STEPS! - NatureDQN: 50k STEPS / 50 EPISODES ANIMALAI
+    SEC_params[
+        'exploration_steps'] = 150  # THE UNITS ARE NUMBER OF AGENT STEPS! - NatureDQN: 50k STEPS / 50 EPISODES ANIMALAI
     SEC_params['epsilon'] = 0.05  # DEFAULT FOR MFEC IN ATARI: 0.1
 
     SEC_params['selection_mode'] = 'default'  # selection_mode = ['default', 'argmax']
@@ -92,7 +99,6 @@ def spatial_navigation() -> None:
 
     # About the agent
     SORB_params['act_num'] = len(SORB_params['actions'])  # - Size of action space # TODO make it adaptive
-    SORB_params['known_env'] = False  # --------------------- Is the environment known in advance
     SORB_params['model_type'] = 'VI'  # --------------------- 'VI' value iteration or 'TD' temporal difference
     if SORB_params['model_type'] == 'TD':
         SORB_params['alpha'] = 0.8  # ----------------------- from Massi et al. (2022) MF-priority

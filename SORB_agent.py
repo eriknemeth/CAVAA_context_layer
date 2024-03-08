@@ -44,7 +44,6 @@ class RLagent:
                 alpha: learning rat eif model_type is 'TD' [float]
                 beta: for softmax decisions (non-optional) [float]
                 epsilon: for epsilon-greedy decisions (non-optional) [float]
-                known_env: is the number of states previously known [True] or not [False, default]
             Regarding the replay:
                 replay_type: "forward", "backward", "priority", "trsam", "bidir" (optional) [str]
                     event_handle: what should we compare a new event to when trying to estimate if we need to
@@ -74,7 +73,6 @@ class RLagent:
             raise ValueError("Decision rule '" + decision_rule + "' does not exist")
 
         # The parameters of the environment
-        known_env = kwargs.get('known_env', False)
         self._nS = 1  # We might only know a single state of the environment (the one we're in)
         self._states = np.array([curr_state])  # an array of sates. The idx of each state is my state label
         self._nA = act_num  # max number of possible actions per state
@@ -187,11 +185,8 @@ class RLagent:
         """
         if s is None:
             return s
-        try:
-            # return np.argwhere(self._states == s)[0, 0]
-            return np.where((self._states == s).all(axis=1))[0][0]
-        except AttributeError:
-            return s
+        # return np.argwhere(self._states == s)[0, 0]
+        return np.where((self._states == s).all(axis=1))[0][0]
 
     def __entropy__(self, s: int, a: int, mode: str) -> Union[float, None]:
         """
@@ -652,19 +647,13 @@ class RLagent:
         event = {'iter': [it], 'step': [step]}
         s = kwargs.get('s', None)
         if s is not None:
-            try:
-                event['s'] = [self._states[s]]
-            except AttributeError:
-                event['s'] = [s]
+            event['s'] = [self._states[s]]
         else:
             event['s'] = [None]
         event['a'] = [kwargs.get('a', None)]
         s_prime = kwargs.get('s_prime', None)
         if s_prime is not None:
-            try:
-                event['s_prime'] = [self._states[s_prime]]
-            except AttributeError:
-                event['s_prime'] = [s_prime]
+            event['s_prime'] = [self._states[s_prime]]
         else:
             event['s_prime'] = [None]
         rew = kwargs.get('rew', [None] * 3)
@@ -676,10 +665,7 @@ class RLagent:
         # Now the Q and U values
         for s_idx in range(self._nS):
             for a_idx in range(self._nA):
-                try:
-                    s = self._states[s_idx]  # We need to make it understandable for the environment
-                except AttributeError:
-                    s = s_idx
+                s = self._states[s_idx]  # We need to make it understandable for the environment
                 event[f'Q_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 0]]
                 event[f'Ur_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 1]]
                 event[f'Ut_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 2]]
@@ -744,11 +730,8 @@ class RLagent:
         :return: the epistemic rewards (hr, ht)
         """
         # First we might need to extend the model if s_prime is never before seen and if the environment is unknown
-        try:
-            if not any(np.equal(self._states, s_prime).all(1)):
-                self.__extend_state_space__(s_prime)
-        except AttributeError:
-            pass
+        if not any(np.equal(self._states, s_prime).all(1)):
+            self.__extend_state_space__(s_prime)
 
         # Since s comes from the environment
         s, s_prime = self.__translate_s__(s), self.__translate_s__(s_prime)
@@ -805,11 +788,8 @@ class RLagent:
         virtual = kwargs.get('virtual', False)
 
         if not virtual:  # If s comes from the environment
-            try:
-                if s_prime not in self._states:
-                    self.__extend_state_space__(s_prime)
-            except AttributeError:
-                pass
+            if s_prime not in self._states:
+                self.__extend_state_space__(s_prime)
             s, s_prime = self.__translate_s__(s), self.__translate_s__(s_prime)
             # Extend the state space if needed
 
@@ -985,10 +965,7 @@ class RLagent:
         save_on = kwargs.get('save_on', not self._save_agent)
         if save_on:
             try:
-                try:
-                    s = self._states[-1]  # We need to make it understandable for the environment
-                except AttributeError:
-                    s = self._nS - 1
+                s = self._states[-1]  # We need to make it understandable for the environment
                 if f'Q_{s}_0' not in self._events.columns:  # We added a new state
                     for s_idx in range(self._nS):
                         for a_idx in range(self._nA):
@@ -1003,11 +980,7 @@ class RLagent:
                                 self._events[f'C_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
 
             except AttributeError:  # There is no such thing as _events
-                poss_states = range(self._nS)
-                try:
-                    poss_states = range(self._states.shape[0])  # Thus we won't need to translate
-                except AttributeError:
-                    pass
+                poss_states = range(self._states.shape[0])  # Thus we won't need to translate
                 Q_names = [f'Q_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
                 Ur_names = [f'Ur_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
                 Ut_names = [f'Ut_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]

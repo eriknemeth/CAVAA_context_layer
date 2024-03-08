@@ -3,4 +3,4 @@ import time
 
 if __name__ == '__main__':
     spatial_navigation()
-    experiment_plotter('./savedata', 'environment.txt', 'SORB_agent.csv')
+    experiment_plotter('./savedata', 'environment.txt', 'SORB_agent.csv', 'SECS_agent.csv')

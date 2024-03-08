@@ -523,7 +523,7 @@ class PlotterEnv(Env):
         self._norm_rep = kwargs.get('norm_rep', False)  # Will we normalize the replay maps based on total replay count?
 
         # Placeholders for the agent data
-        self._agent_events = None
+        self._agent_events = {}
         # The following variables are structured as {batch_name: np.ndarray(x, y, repetition), ...}
         self._stopped_at = {}  # A dict of arrays (of the maze) where each state counts stoppings by the agent
         self._replayed = {}  # A dict of arrays (of the maze) where each state counts replays by the agent
@@ -552,7 +552,7 @@ class PlotterEnv(Env):
         :param col_name: s or s_prime
         :return: the x and y coordinates of said state
         """
-        s = self._agent_events[col_name].iloc[row_idx]
+        s = self._agent_events['SORB'][col_name].iloc[row_idx]
         # [x, y] = np.argwhere(self._maze == s)[0]
         [x, y] = [int(n) for n in s[1:-1].split() if n.isdigit()]
         return x, y
@@ -623,7 +623,7 @@ class PlotterEnv(Env):
             path = './'
 
         if os.path.isfile(f'{path}{file_name}'):
-            self._agent_events = pd.read_csv(f'{path}{file_name}')
+            self._agent_events[batch] = pd.read_csv(f'{path}{file_name}')
         else:
             raise FileNotFoundError(f'No file named {file_name}')
 
@@ -637,42 +637,50 @@ class PlotterEnv(Env):
         :return:
         """
         # 0) Preparing the dataframes -- we need the max Q value for each state, and (as of now) the mean H value
-        Q_vals = pd.DataFrame()
+        Q_vals, SEQ_vals = pd.DataFrame(), pd.DataFrame()
         Ur_vals, Ut_vals, C_vals = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-        empty_arr = np.empty(self._agent_events.shape[0])
+        empty_arr = np.empty(self._agent_events['SORB'].shape[0])
         empty_arr[:] = np.nan
         for s_idx in range(self.state_num()):
             [x, y] = np.argwhere(self._maze == s_idx)[0]
-            if f'Q_[{x} {y}]_0' in self._agent_events.columns:
+            if f'Q_[{x} {y}]_0' in self._agent_events['SECS'].columns:
                 cols = [f'Q_[{x} {y}]_{a_idx}' for a_idx in range(self.act_num())]
-                Q_vals[f'Q_{s_idx}'] = self._agent_events[cols].max(axis=1)
+                SEQ_vals[f'Q_{s_idx}'] = self._agent_events['SECS'][cols].max(axis=1)
+            else:
+                SEQ_vals[f'Q_{s_idx}'] = pd.DataFrame(empty_arr,
+                                                    columns=[f'Q_{s_idx}'])
+
+            if f'Q_[{x} {y}]_0' in self._agent_events['SORB'].columns:
+                cols = [f'Q_[{x} {y}]_{a_idx}' for a_idx in range(self.act_num())]
+                Q_vals[f'Q_{s_idx}'] = self._agent_events['SORB'][cols].max(axis=1)
             else:
                 Q_vals[f'Q_{s_idx}'] = pd.DataFrame(empty_arr,
                                                     columns=[f'Q_{s_idx}'])
             # As for the H values, some actions (namely the forbidden ones) will never be explored by the agent. Thus
             # instead of storing all H values from the table, we only store those that the agent had a chance to learn
-            if f'Ur_[{x} {y}]_0' in self._agent_events.columns:
+            if f'Ur_[{x} {y}]_0' in self._agent_events['SORB'].columns:
                 cols = [f'Ur_[{x} {y}]_{a_idx}' for a_idx in self.possible_moves(np.array([x, y]))]
-                Ur_vals[f'Ur_{s_idx}'] = self._agent_events[cols].max(axis=1)
+                Ur_vals[f'Ur_{s_idx}'] = self._agent_events['SORB'][cols].max(axis=1)
             else:
                 Ur_vals[f'Ur_{s_idx}'] = pd.DataFrame(empty_arr,
                                                       columns=[f'Ur_{s_idx}'])
 
-            if f'Ut_[{x} {y}]_0' in self._agent_events.columns:
+            if f'Ut_[{x} {y}]_0' in self._agent_events['SORB'].columns:
                 cols = [f'Ut_[{x} {y}]_{a_idx}' for a_idx in self.possible_moves(np.array([x, y]))]
-                Ut_vals[f'Ut_{s_idx}'] = self._agent_events[cols].max(axis=1)
+                Ut_vals[f'Ut_{s_idx}'] = self._agent_events['SORB'][cols].max(axis=1)
             else:
                 Ut_vals[f'Ut_{s_idx}'] = pd.DataFrame(empty_arr,
                                                       columns=[f'Ut_{s_idx}'])
 
-            if f'C_[{x} {y}]_0' in self._agent_events.columns:
+            if f'C_[{x} {y}]_0' in self._agent_events['SORB'].columns:
                 cols = [f'C_[{x} {y}]_{a_idx}' for a_idx in self.possible_moves(np.array([x, y]))]
-                C_vals[f'C_{s_idx}'] = self._agent_events[cols].max(axis=1)
+                C_vals[f'C_{s_idx}'] = self._agent_events['SORB'][cols].max(axis=1)
             else:
                 C_vals[f'C_{s_idx}'] = pd.DataFrame(empty_arr,
                                                     columns=[f'C_{s_idx}'])
 
-        max_vals = np.array([np.nanmax(Q_vals.iloc[0].to_numpy()),  # Qmax
+        max_vals = np.array([np.nanmax(SEQ_vals.iloc[0].to_numpy()),  # SEQmax
+                             np.nanmax(Q_vals.iloc[0].to_numpy()),  # Qmax
                              np.nanmax(Ur_vals.iloc[0].to_numpy()),  # Ur max
                              np.nanmax(Ut_vals.iloc[0].to_numpy())])  # Ut max
         max_vals[max_vals == 0] = 1
@@ -681,55 +689,60 @@ class PlotterEnv(Env):
         plt.ion()
         fig_env, ax_env = plt.subplots(nrows=1, ncols=3, figsize=(15, 4))
         ax_env[0].set_title("Map")
-        ax_env[1].set_title("Replay")
+        ax_env[1].set_title("SEQ values")
         ax_env[2].set_title("C values")
         curr_maze = self.__status_to_image__(0)
-        curr_replay = np.zeros(self._maze.shape)
+        curr_SEQ = self.__event_to_img__(SEQ_vals.iloc[0])
         curr_C = self.__event_to_img__(C_vals.iloc[0])
         axim_env = np.array([ax_env[0].imshow(curr_maze),
-                             ax_env[1].imshow(curr_replay),
+                             ax_env[1].imshow(curr_SEQ, vmin=0, vmax=max_vals[0]),
                              ax_env[2].imshow(curr_C, vmin=0, vmax=1)])
         axim_env[0].autoscale()  # Since here the extremes already appear
-        axim_env[1].autoscale()  # This will have to be done in every step if we want the old replay steps to fade away
 
-        fig_rla, ax_rla = plt.subplots(nrows=1, ncols=3, figsize=(15, 4))
+        fig_rla, ax_rla = plt.subplots(nrows=1, ncols=4, figsize=(20, 4))
         ax_rla[0].set_title("Q values")
         ax_rla[1].set_title("Ur values")
         ax_rla[2].set_title("Ut values")
+        ax_rla[3].set_title("Replay")
         curr_Ur = self.__event_to_img__(Ur_vals.iloc[0])
         curr_Ut = self.__event_to_img__(Ut_vals.iloc[0])
         curr_Q = self.__event_to_img__(Q_vals.iloc[0])
-        axim_rla = np.array([ax_rla[0].imshow(curr_Q, vmin=0, vmax=max_vals[0]),
-                             ax_rla[1].imshow(curr_Ur, vmin=0, vmax=max_vals[1]),
-                             ax_rla[2].imshow(curr_Ut, vmin=0, vmax=max_vals[2])])
+        curr_replay = np.zeros(self._maze.shape)
+        axim_rla = np.array([ax_rla[0].imshow(curr_Q, vmin=0, vmax=max_vals[1]),
+                             ax_rla[1].imshow(curr_Ur, vmin=0, vmax=max_vals[2]),
+                             ax_rla[2].imshow(curr_Ut, vmin=0, vmax=max_vals[3]),
+                             ax_rla[3].imshow(curr_replay)])
+        axim_rla[3].autoscale()
 
-        txt = np.empty((*self._maze.shape, 4), dtype=matplotlib.text.Text)  # txt will appear for the Q and the H values
+        txt = np.empty((*self._maze.shape, 5), dtype=matplotlib.text.Text)  # txt will appear for the Q and the H values
         for idx_x in range(txt.shape[0]):
             for idx_y in range(txt.shape[1]):
-                txt[idx_x, idx_y, 0] = ax_env[2].text(idx_y, idx_x, f"{curr_C[idx_x, idx_y]: .2f}",
+                txt[idx_x, idx_y, 0] = ax_env[1].text(idx_y, idx_x, f"{curr_SEQ[idx_x, idx_y]: .2f}",
                                                       ha="center", va="center", color="w")
-                txt[idx_x, idx_y, 1] = ax_rla[0].text(idx_y, idx_x, f"{curr_Q[idx_x, idx_y]: .2f}",
+                txt[idx_x, idx_y, 1] = ax_env[2].text(idx_y, idx_x, f"{curr_C[idx_x, idx_y]: .2f}",
                                                       ha="center", va="center", color="w")
-                txt[idx_x, idx_y, 2] = ax_rla[1].text(idx_y, idx_x, f"{curr_Ur[idx_x, idx_y]: .1f}",
+                txt[idx_x, idx_y, 2] = ax_rla[0].text(idx_y, idx_x, f"{curr_Q[idx_x, idx_y]: .2f}",
                                                       ha="center", va="center", color="w")
-                txt[idx_x, idx_y, 3] = ax_rla[2].text(idx_y, idx_x, f"{curr_Ut[idx_x, idx_y]: .1f}",
+                txt[idx_x, idx_y, 3] = ax_rla[1].text(idx_y, idx_x, f"{curr_Ur[idx_x, idx_y]: .1f}",
+                                                      ha="center", va="center", color="w")
+                txt[idx_x, idx_y, 4] = ax_rla[2].text(idx_y, idx_x, f"{curr_Ut[idx_x, idx_y]: .1f}",
                                                       ha="center", va="center", color="w")
 
         # plt.pause(.001)
 
         # 2) Looping through the memories
-        for row_idx in range(1, self._agent_events.shape[0]):
-            it = int(self._agent_events['iter'].iloc[row_idx])
-            step = int(self._agent_events['step'].iloc[row_idx])
+        for row_idx in range(1, self._agent_events['SORB'].shape[0]):
+            it = int(self._agent_events['SORB']['iter'].iloc[row_idx])
+            step = int(self._agent_events['SORB']['step'].iloc[row_idx])
 
             # 2.a) If the agent's memory does not correspond to that of the environment, we quit
             # It is important to note here that during replay there's always a mismatch (hence if self > 0 we ignore)
             # and that if a reward is given, the agent is moved, so there's also a mismatch
-            if step == 0 and self._agent_events['r'].iloc[row_idx] == 0 \
+            if step == 0 and self._agent_events['SORB']['r'].iloc[row_idx] == 0 \
                     and list(self.__find_state_coord__(row_idx, 's_prime')) != \
                     [int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])]:
-                    # and self._agent_events['s_prime'].iloc[row_idx] != \
-                    # self._maze[int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])]:
+                # and self._agent_events['s_prime'].iloc[row_idx] != \
+                # self._maze[int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])]:
                 raise ValueError("mismatch between agent and environment memory")
 
             # 2.b) Else we have to see if we perform replay or not
@@ -738,10 +751,12 @@ class PlotterEnv(Env):
             else:
                 curr_replay = np.zeros(self._maze.shape)
             curr_maze = self.__status_to_image__(it)
+            curr_SEQ = self.__event_to_img__(SEQ_vals.iloc[it])
             curr_Q = self.__event_to_img__(Q_vals.iloc[row_idx])
             curr_Ur = self.__event_to_img__(Ur_vals.iloc[row_idx])
             curr_Ut = self.__event_to_img__(Ut_vals.iloc[row_idx])
-            max_vals = np.array([np.nanmax(Q_vals.iloc[row_idx].to_numpy()),  # Qmax
+            max_vals = np.array([np.nanmax(SEQ_vals.iloc[it].to_numpy()),  # SEQmax
+                                 np.nanmax(Q_vals.iloc[row_idx].to_numpy()),  # Qmax
                                  np.nanmax(Ur_vals.iloc[row_idx].to_numpy()),  # Ur max
                                  np.nanmax(Ut_vals.iloc[row_idx].to_numpy())])  # Ut max
             max_vals[max_vals == 0] = 1
@@ -750,23 +765,26 @@ class PlotterEnv(Env):
             # 2.c) Refresh txt
             for idx_x in range(txt.shape[0]):
                 for idx_y in range(txt.shape[1]):
-                    txt[idx_x, idx_y, 0].set_text(f"{curr_C[idx_x, idx_y]: .2f}")
-                    txt[idx_x, idx_y, 1].set_text(f"{curr_Q[idx_x, idx_y]: .2f}")
-                    txt[idx_x, idx_y, 2].set_text(f"{curr_Ur[idx_x, idx_y]: .1f}")
-                    txt[idx_x, idx_y, 3].set_text(f"{curr_Ut[idx_x, idx_y]: .1f}")
+                    txt[idx_x, idx_y, 0].set_text(f"{curr_SEQ[idx_x, idx_y]: .2f}")
+                    txt[idx_x, idx_y, 1].set_text(f"{curr_C[idx_x, idx_y]: .2f}")
+                    txt[idx_x, idx_y, 2].set_text(f"{curr_Q[idx_x, idx_y]: .2f}")
+                    txt[idx_x, idx_y, 3].set_text(f"{curr_Ur[idx_x, idx_y]: .1f}")
+                    txt[idx_x, idx_y, 4].set_text(f"{curr_Ut[idx_x, idx_y]: .1f}")
 
             # 2.d) Refresh plots
             axim_env[0].set_data(curr_maze)
-            axim_env[1].set_data(curr_replay)
+            axim_env[1].set_data(curr_SEQ)
             axim_env[2].set_data(curr_C)
-            axim_env[1].autoscale()
+            axim_env[1].set_clim(vmax=max_vals[0])
 
             axim_rla[0].set_data(curr_Q)
             axim_rla[1].set_data(curr_Ur)
             axim_rla[2].set_data(curr_Ut)
-            axim_rla[0].set_clim(vmax=max_vals[0])
-            axim_rla[1].set_clim(vmax=max_vals[1])
-            axim_rla[2].set_clim(vmax=max_vals[2])
+            axim_rla[3].set_data(curr_replay)
+            axim_rla[0].set_clim(vmax=max_vals[1])
+            axim_rla[1].set_clim(vmax=max_vals[2])
+            axim_rla[2].set_clim(vmax=max_vals[3])
+            axim_rla[3].autoscale()
 
             # 2.e) Stop
             fig_env.canvas.flush_events()
