@@ -214,7 +214,8 @@ class Env:
 
         :return: current state of the agent
         """
-        return np.array([self._maze[self._agent_pos.astype(bool)][0]])
+        # return np.array([self._maze[self._agent_pos.astype(bool)][0]])
+        return np.argwhere(self._agent_pos)[0]
 
     def possible_moves(self, s: np.ndarray) -> np.ndarray:
         """
@@ -225,7 +226,8 @@ class Env:
         :return: a numpy array of possible actions to choose from (labels follow those of self._act)
         """
 
-        [x, y] = np.argwhere(self._maze == s[0])[0]
+        # [x, y] = np.argwhere(self._maze == s[0])[0]
+        x, y = s[0], s[1]
         moves = np.array(range(len(self._act)))
         moves = moves[~self._restrict[x, y, :].astype(bool)]
         return moves.astype(int)
@@ -246,7 +248,7 @@ class Env:
             this epoch is over
         """
         # Let's remove the agent from the starting state
-        [x, y] = np.argwhere(self._maze == s[0])[0]
+        x, y = s[0], s[1]
         self._agent_pos[x, y] = 0
 
         # Then see where we land
@@ -274,7 +276,8 @@ class Env:
 
         # Saving
         self.__save_step__()
-        return np.array([s_prime]), rew, rew > 0
+        # return np.array([s_prime]), rew, rew > 0
+        return np.array([x_prime, y_prime]), rew, rew > 0
 
     def place_reward(self, reward_state: np.ndarray, reward_val: np.ndarray, reward_prob: np.ndarray) -> None:
         """
@@ -285,7 +288,8 @@ class Env:
         :return: -
         """
         for rew_idx in range(len(reward_state)):
-            [x, y] = np.argwhere(self._maze == reward_state[rew_idx])[0]
+            # [x, y] = np.argwhere(self._maze == reward_state[rew_idx])[0]
+            x = reward_state[rew_idx], y = reward_state[rew_idx]
             # Where is the reward and how big is it?
             self._reward[x, y] = reward_val[rew_idx]
             # What is the likelihood of getting a reward
@@ -305,13 +309,14 @@ class Env:
         self._reward_prob = np.zeros(self._maze.shape)
         return
 
-    def place_agent(self, init_state: int) -> np.ndarray:
+    def place_agent(self, init_state: np.ndarray) -> np.ndarray:
         """
         A function to place the agent onto state init_state. If saving is on this function will overwrite the location
         of the agent in the last row of the memory.
         :param init_state: the state (understood by the agent) where we should be placed
         """
-        [x, y] = np.argwhere(self._maze == init_state)[0]
+        # [x, y] = np.argwhere(self._maze == init_state)[0]
+        x, y = init_state[0], init_state[1]
 
         # Remove the agent from its old position
         self._agent_pos = np.zeros(self._maze.shape)
@@ -320,7 +325,8 @@ class Env:
 
         # Take care of saving by overwriting the last element
         self.__overwrite_step__(x, y)
-        return np.array([init_state])
+        # return np.array([init_state])
+        return np.array([x, y])
 
     # About saving
     def toggle_save(self, **kwargs) -> None:
@@ -547,7 +553,8 @@ class PlotterEnv(Env):
         :return: the x and y coordinates of said state
         """
         s = self._agent_events[col_name].iloc[row_idx]
-        [x, y] = np.argwhere(self._maze == s)[0]
+        # [x, y] = np.argwhere(self._maze == s)[0]
+        [x, y] = [int(n) for n in s[1:-1].split() if n.isdigit()]
         return x, y
 
     def __event_to_img__(self, values: pd.core.frame.DataFrame) -> np.ndarray:
@@ -635,30 +642,31 @@ class PlotterEnv(Env):
         empty_arr = np.empty(self._agent_events.shape[0])
         empty_arr[:] = np.nan
         for s_idx in range(self.state_num()):
-            if f'Q_{s_idx}_0' in self._agent_events.columns:
-                cols = [f'Q_{s_idx}_{a_idx}' for a_idx in range(self.act_num())]
+            [x, y] = np.argwhere(self._maze == s_idx)[0]
+            if f'Q_[{x} {y}]_0' in self._agent_events.columns:
+                cols = [f'Q_[{x} {y}]_{a_idx}' for a_idx in range(self.act_num())]
                 Q_vals[f'Q_{s_idx}'] = self._agent_events[cols].max(axis=1)
             else:
                 Q_vals[f'Q_{s_idx}'] = pd.DataFrame(empty_arr,
                                                     columns=[f'Q_{s_idx}'])
             # As for the H values, some actions (namely the forbidden ones) will never be explored by the agent. Thus
             # instead of storing all H values from the table, we only store those that the agent had a chance to learn
-            if f'Ur_{s_idx}_0' in self._agent_events.columns:
-                cols = [f'Ur_{s_idx}_{a_idx}' for a_idx in self.possible_moves(np.array([s_idx]))]
+            if f'Ur_[{x} {y}]_0' in self._agent_events.columns:
+                cols = [f'Ur_[{x} {y}]_{a_idx}' for a_idx in self.possible_moves(np.array([x, y]))]
                 Ur_vals[f'Ur_{s_idx}'] = self._agent_events[cols].max(axis=1)
             else:
                 Ur_vals[f'Ur_{s_idx}'] = pd.DataFrame(empty_arr,
                                                       columns=[f'Ur_{s_idx}'])
 
-            if f'Ut_{s_idx}_0' in self._agent_events.columns:
-                cols = [f'Ut_{s_idx}_{a_idx}' for a_idx in self.possible_moves(np.array([s_idx]))]
+            if f'Ut_[{x} {y}]_0' in self._agent_events.columns:
+                cols = [f'Ut_[{x} {y}]_{a_idx}' for a_idx in self.possible_moves(np.array([x, y]))]
                 Ut_vals[f'Ut_{s_idx}'] = self._agent_events[cols].max(axis=1)
             else:
                 Ut_vals[f'Ut_{s_idx}'] = pd.DataFrame(empty_arr,
                                                       columns=[f'Ut_{s_idx}'])
 
-            if f'C_{s_idx}_0' in self._agent_events.columns:
-                cols = [f'C_{s_idx}_{a_idx}' for a_idx in self.possible_moves(np.array([s_idx]))]
+            if f'C_[{x} {y}]_0' in self._agent_events.columns:
+                cols = [f'C_[{x} {y}]_{a_idx}' for a_idx in self.possible_moves(np.array([x, y]))]
                 C_vals[f'C_{s_idx}'] = self._agent_events[cols].max(axis=1)
             else:
                 C_vals[f'C_{s_idx}'] = pd.DataFrame(empty_arr,
@@ -718,8 +726,10 @@ class PlotterEnv(Env):
             # It is important to note here that during replay there's always a mismatch (hence if self > 0 we ignore)
             # and that if a reward is given, the agent is moved, so there's also a mismatch
             if step == 0 and self._agent_events['r'].iloc[row_idx] == 0 \
-                    and self._agent_events['s_prime'].iloc[row_idx] != \
-                    self._maze[int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])]:
+                    and list(self.__find_state_coord__(row_idx, 's_prime')) != \
+                    [int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])]:
+                    # and self._agent_events['s_prime'].iloc[row_idx] != \
+                    # self._maze[int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])]:
                 raise ValueError("mismatch between agent and environment memory")
 
             # 2.b) Else we have to see if we perform replay or not

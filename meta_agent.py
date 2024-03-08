@@ -13,37 +13,9 @@ class metaAgent():
     def __init__(self, SEC_params: dict, SORB_params: dict) -> None:
         self._replay_thresh = SORB_params['replay_thresh']
         self._plan = SORB_params['replay_type'] in ['trsam', 'bidir']
-        self._states = np.array([[SORB_params['curr_state']]])
-        SORB_params['curr_state'] = self.__decode_state__(SORB_params['curr_state'])
         self._SEC = SECagent(**SEC_params)
         self._SORB = RLagent(**SORB_params)
         return
-
-    # Private methods
-    def __add_new_state__(self, state: np.ndarray) -> None:
-        """
-        Upon encountering a new state, add it to the _states dictionary, so that the agent can translate it into ints
-        Args:
-            state: the coordinates of the newly encountered state
-
-        Returns:
-
-        """
-        if state not in self._states:
-            self._states = np.append(self._states, np.array([[state]]), axis=0)
-        return
-
-    def __decode_state__(self, state: np.ndarray) -> int:
-        """
-        Decodes the sate into integers for the MB agent
-        Args:
-            state:
-
-        Returns:
-
-        """
-        # return np.where((self._states == np.array([state])).all(axis=1))[0][0]
-        return state[0]
 
     # Public methods
     def action_selection(self, state: np.ndarray, poss_moves: np.ndarray) -> Tuple[int, bool]:
@@ -61,8 +33,7 @@ class metaAgent():
         action_SEC, Q_SEC = self._SEC.choose_action(state)
 
         # 2) MB action selection
-        decoded_state = self.__decode_state__(state)
-        action_SORB, Q_SORB = self._SORB.choose_action(decoded_state, poss_moves)
+        action_SORB, Q_SORB = self._SORB.choose_action(state, poss_moves)
 
         return action_SEC, True
 
@@ -84,10 +55,6 @@ class metaAgent():
         Returns:
             True if the agent performed replay, False if not
         """
-        # 0) First if we just encountered a brand-new state, let's add it to our dictionary
-        if new_state not in self._states:
-            self.__add_new_state__(new_state)
-
         # 1) Teach the MF agent
         # Update SEC's STM based on previous (state,action) couplet
         self._SEC.update_STM(couplet=[state, action])  # TODO changed it to couplet from sa_couplet
@@ -95,10 +62,8 @@ class metaAgent():
         self._SEC.update_LTM(reward)
 
         # 2) Teach the MB agents
-        decoded_state = self.__decode_state__(state)
-        decoded_new_state = self.__decode_state__(new_state)
-        hr, ht = self._SORB.model_learning(decoded_state, action, decoded_new_state, reward)
-        replayed = self._SORB.inference(decoded_state, action, decoded_new_state, np.array([hr, ht, reward]))
+        hr, ht = self._SORB.model_learning(state, action, new_state, reward)
+        replayed = self._SORB.inference(state, action, new_state, np.array([hr, ht, reward]))
 
         # 3) Return
         return replayed
