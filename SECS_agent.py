@@ -60,6 +60,11 @@ class SECagent(object):
         self.exploration_steps = exploration_steps # full random exploration time
         self.epsilon = epsilon
 
+        self._save_agent = False  # Initialize save_agent flag
+        self.unique_states = []
+        self.q_values = {}
+        self._events = None  # Initialize events DataFrame for saving
+        
         if load_ltm: self.load_LTM()
 
     def choose_action(self, state):
@@ -250,21 +255,21 @@ class SECagent(object):
 
     def compute_q_table(self):
         # Step 1: Retrieve all unique states experienced from LTM
-        unique_states = np.unique(self.LTM[0])
-        print("unique_states:", unique_states)
+        self.unique_states = np.unique(self.LTM[0])
+        print("self.unique_states:", self.unique_states)
 
         # Step 2: Compute Q values for each state using the estimate_return() function
-        q_values = {}
-        for state in unique_states:
-            q_values[state] = self.estimate_return(state)
+        self.q_values = {}
+        for state in self.unique_states:
+            self.q_values[state] = self.estimate_return(state)
 
         # Step 3: Save the maximum value of the resulting q values for each state in a new table
         max_q_values = {}
-        for state, q_value in q_values.items():
+        for state, q_value in self.q_values.items():
             max_q_values[state] = np.max(q_value)
 
         # Step 4: Save the max_q table into a csv file
-        self.save_max_q_values(max_q_values, 'max_q_values.csv')
+        #self.save_max_q_values(max_q_values, 'max_q_values.csv')
 
     def save_max_q_values(self, max_q_values, filename):
         with open(filename, mode='w', newline='') as file:
@@ -428,65 +433,85 @@ class SECagent(object):
             self.selected_actions_indx.append(np.zeros(self.stm_length, dtype='bool').tolist())
             self.last_actions_indx.append(np.zeros(self.stm_length, dtype='bool').tolist())
 
-    # All about saving
-    def toggle_save(self, **kwargs) -> None:
-        """
-        Toggles save. If the agent was saving its status so far, it sops doing so. Otherwise, it begins to do so,
-        by already storing a snapshot of the current state as well.
-        Important to note that this function can also be called to extend the saved table in case a new state is
-        encountered.
-        :param kwargs:
-            save_on: If instead of toggling, we want to make sure to turn it on [True] or off [False], we can
-        :return:
-        """
-        save_on = kwargs.get('save_on', not self._save_agent)
-        if save_on:
-            try:
-                try:
-                    s = self._states[-1]  # We need to make it understandable for the environment
-                except AttributeError:
-                    s = self._nS - 1
-                if f'Q_{s}_0' not in self._events.columns:  # We added a new state
-                    for s_idx in range(self._nS):
-                        for a_idx in range(self._nA):
-                            try:
-                                s = self._states[s_idx]  # We need to make it understandable for the environment
-                            except AttributeError:
-                                s = s_idx
-                            if f'Q_{s}_{a_idx}' not in self._events.columns:
-                                self._events[f'Q_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
-                                self._events[f'Ur_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
-                                self._events[f'Ut_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
-                                self._events[f'C_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
+    def compute_q_table(self):
+        # Step 1: Retrieve all unique states experienced from LTM
+        self.unique_states = np.unique(self.LTM[0])
+        print("self.unique_states:", self.unique_states)
 
-            except AttributeError:  # There is no such thing as _events
-                poss_states = range(self._nS)
-                try:
-                    poss_states = self._states  # Thus we won't need to translate
-                except AttributeError:
-                    pass
-                Q_names = [f'Q_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
-                Ur_names = [f'Ur_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
-                Ut_names = [f'Ut_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
-                C_names = [f'C_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self._nA)]
-                self._events = pd.DataFrame(columns=['iter', 'step', 's', 'u', 's_prime', 'r', 'hr', 'ht', 'deltaC',
-                                                     *Q_names, *Ur_names, *Ut_names, *C_names])
-            if not self._save_agent:
-                self._save_agent = True
-                self.__save_step__(True)  # If we just turned it on, we take a snapshot of the agent's current state
+        # Step 2: Compute Q values for each state using the estimate_return() function
+        self.q_values = {}
+        for state in self.unique_states:
+            self.q_values[state] = self.estimate_return(state)
+
+        # Step 3: Save the maximum value of the resulting q values for each state in a new table
+        max_q_values = {}
+        for state, q_value in self.q_values.items():
+            max_q_values[state] = np.max(q_value)
+
+        # Step 4: Save the max_q table into a csv file
+        #self.save_max_q_values(max_q_values, 'max_q_values.csv')
+
+    def save_max_q_values(self, max_q_values, filename):
+        with open(filename, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['State', 'Max_Q_Value'])
+            for state, max_q_value in max_q_values.items():
+                writer.writerow([state, max_q_value])
+        print("Max Q values saved to", filename)
+
+    def compute_q_table(self):
+        # Step 1: Retrieve all unique states experienced from LTM
+        self.unique_states = np.unique(self.LTM[0])
+
+        # Step 2: Compute Q values for each state using the estimate_return() function
+        self.q_values = {}
+        for state in self.unique_states:
+            self.q_values[state] = self.estimate_return(state)
+
+        # Step 3: Save the maximum value of the resulting q values for each state in a new table
+        max_q_values = {}
+        for state, q_value in self.q_values.items():
+            max_q_values[state] = np.max(q_value)
+        return max_q_values
+
+    def save_step(self, virtual=False, s=None, a=None, rew=None):
+        """
+        Saves the current state of the agent by adding a row to the _events memory.
+        :param virtual: is this a virtual step [True] or a real one [False]
+        :param s: last state
+        :param a: last action
+        :param rew: reward
+        """
+        if not self._save_agent:
+            return
+
+        # Which step are we at
+        it = 0
+        if self._events is not None and self._events.shape[0] > 0:
+            if not virtual:  # If real, it's a new iteration
+                it = self._events['iter'].iloc[-1] + 1
+            else:  # else it's the same iteration but a new step
+                it = self._events['iter'].iloc[-1]
+
+        # Format the event to store
+        event = {'iter': [it], 's': [s], 'a': [a], 'r': [rew]}
+        for state in self.unique_states:
+            for action_idx in range(self.action_space):
+                event[f'Q_{state}_{action_idx}'] = [self.q_values[state][action_idx]]
+
+        # Add it to the table
+        events_temp = pd.DataFrame.from_dict(event).fillna(value=np.nan)
+        if self._events is None or events_temp.empty:
+            self._events = events_temp.copy()
         else:
-            self._save_agent = False
+            self._events = pd.concat([self._events, events_temp], ignore_index=True)
 
-    def dump_agent(self, **kwargs) -> None:
+    def dump_agent(self, path=None, label=None):
         """
         Saves everything that we have stored into 2 different files: one for the agent, and one for the events.
-        :param kwargs:
-            path: [str] the path to save the document. If no path is defined then the current working folder will be
-                used
-            label: [str] an additional label to add at the end of the output file name.
-        :return:
+        :param path: the path to save the document. If no path is defined then the current working folder will be used
+        :param label: an additional label to add at the end of the output file name.
         """
-        path = kwargs.get('path', None)
         if path is not None:
             if path[-1] != '/':
                 path = f'{path}/'
@@ -494,44 +519,14 @@ class SECagent(object):
                 os.mkdir(path)
         else:
             path = './'
-        label = kwargs.get('label', None)
+
         if label is not None:
             label = f'_{label}'
         else:
             label = ''
 
-        # 1) Save the whole agent
-        # file = open(f'{path}agent{label}.txt', 'wb')
-        # pickle.dump(self.__dict__, file, 2)
-        # file.close()
-
-        # 2) Save the events
+        # Save the events
         try:
-            self._events.to_csv(f'{path}SORB_agent{label}.csv', sep=',', index=False, encoding='utf-8')
+            self._events.to_csv(f'{path}SEC_agent{label}.csv', sep=',', index=False, encoding='utf-8')
         except AttributeError:
             print('Note: This agent does not store the transpired events, no .csv generated.')
-
-    def load_agent(self, file_name: str, **kwargs):
-        """
-        Loads a previously saved agent
-        :param file_name: the name of the environment file [txt]
-        :param kwargs:
-            path: path to the file. If nothing is specified we'll be looking in the working folder
-        :return:
-        """
-        path = kwargs.get('path', None)
-        if path is not None:
-            if path[-1] != '/':
-                path = f'{path}/'
-            if not os.path.isdir(path):
-                raise FileNotFoundError(f'No directory named {path}')
-        else:
-            path = './'
-
-        if os.path.isfile(f'{path}{file_name}'):
-            file = open(f'{path}{file_name}', 'rb')
-            tmp_dict = pickle.load(file)
-            file.close()
-            self.__dict__.update(tmp_dict)
-        else:
-            raise FileNotFoundError(f'No file named {file_name}')
