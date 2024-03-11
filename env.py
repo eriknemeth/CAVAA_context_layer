@@ -647,9 +647,9 @@ class PlotterEnv(Env):
         empty_arr[:] = np.nan
         for s_idx in range(self.state_num()):
             [x, y] = np.argwhere(self._maze == s_idx)[0]
-            if f'Q_[{x} {y}]_0' in self._agent_events['SECS'].columns:
-                cols = [f'Q_[{x} {y}]_{a_idx}' for a_idx in range(self.act_num())]
-                SEQ_vals[f'Q_{s_idx}'] = self._agent_events['SECS'][cols].max(axis=1)
+            if f'Q_({x}, {y})_0' in self._agent_events['SEC'].columns:
+                cols = [f'Q_({x}, {y})_{a_idx}' for a_idx in range(self.act_num())]
+                SEQ_vals[f'Q_{s_idx}'] = self._agent_events['SEC'][cols].max(axis=1)
             else:
                 SEQ_vals[f'Q_{s_idx}'] = pd.DataFrame(empty_arr,
                                                     columns=[f'Q_{s_idx}'])
@@ -683,7 +683,7 @@ class PlotterEnv(Env):
                 C_vals[f'C_{s_idx}'] = pd.DataFrame(empty_arr,
                                                     columns=[f'C_{s_idx}'])
 
-        max_vals = np.array([np.nanmax(SEQ_vals.iloc[0].to_numpy()),  # SEQmax
+        max_vals = np.array([1,  # SEQmax
                              np.nanmax(Q_vals.iloc[0].to_numpy()),  # Qmax
                              np.nanmax(Ur_vals.iloc[0].to_numpy()),  # Ur max
                              np.nanmax(Ut_vals.iloc[0].to_numpy())])  # Ut max
@@ -696,7 +696,7 @@ class PlotterEnv(Env):
         ax_env[1].set_title("SEQ values")
         ax_env[2].set_title("C values")
         curr_maze = self.__status_to_image__(0)
-        curr_SEQ = self.__event_to_img__(SEQ_vals.iloc[0])
+        curr_SEQ = self.__event_to_img__(pd.DataFrame(np.nan, index=[0], columns=SEQ_vals.columns).iloc[0])
         curr_C = self.__event_to_img__(C_vals.iloc[0])
         axim_env = np.array([ax_env[0].imshow(curr_maze),
                              ax_env[1].imshow(curr_SEQ, vmin=0, vmax=max_vals[0]),
@@ -735,6 +735,7 @@ class PlotterEnv(Env):
         # plt.pause(.001)
 
         # 2) Looping through the memories
+        SEQ_idx = 0
         for row_idx in range(1, self._agent_events['SORB'].shape[0]):
             it = int(self._agent_events['SORB']['iter'].iloc[row_idx])
             step = int(self._agent_events['SORB']['step'].iloc[row_idx])
@@ -755,11 +756,15 @@ class PlotterEnv(Env):
             else:
                 curr_replay = np.zeros(self._maze.shape)
             curr_maze = self.__status_to_image__(it)
-            curr_SEQ = self.__event_to_img__(SEQ_vals.iloc[it])
+            if int(self._agent_events['SORB']['step'].iloc[row_idx-1]) == 0 and \
+               self._agent_events['SORB']['r'].iloc[row_idx-1] > 0:  # If the previous round was rewarded
+                curr_SEQ = self.__event_to_img__(SEQ_vals.iloc[SEQ_idx])
+                max_vals[0] = np.nanmax(SEQ_vals.iloc[SEQ_idx].to_numpy())
+                SEQ_idx += 1
             curr_Q = self.__event_to_img__(Q_vals.iloc[row_idx])
             curr_Ur = self.__event_to_img__(Ur_vals.iloc[row_idx])
             curr_Ut = self.__event_to_img__(Ut_vals.iloc[row_idx])
-            max_vals = np.array([np.nanmax(SEQ_vals.iloc[it].to_numpy()),  # SEQmax
+            max_vals = np.array([max_vals[0],  # SEQmax
                                  np.nanmax(Q_vals.iloc[row_idx].to_numpy()),  # Qmax
                                  np.nanmax(Ur_vals.iloc[row_idx].to_numpy()),  # Ur max
                                  np.nanmax(Ut_vals.iloc[row_idx].to_numpy())])  # Ut max

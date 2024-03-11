@@ -15,7 +15,7 @@ def experiment_plotter(path: str, env_file: str, SORB_file: str, SECS_file: str)
     """
     dTm = PlotterEnv(env_file, path=path)
     dTm.load_events(SORB_file, 'SORB', path=path)
-    dTm.load_events(SECS_file, 'SECS', path=path)
+    dTm.load_events(SECS_file, 'SEC', path=path)
     dTm.plot_events()
 
 
