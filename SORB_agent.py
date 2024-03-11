@@ -620,6 +620,7 @@ class RLagent:
     def __save_step__(self, virtual: bool, **kwargs) -> None:
         """
         Saves the current state of the maze by adding a row to the _events memory.
+        
         :param virtual: is this a virtual step [True] or a real one [False]
         :param kwargs:
             s: last state

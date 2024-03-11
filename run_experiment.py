@@ -83,7 +83,7 @@ def spatial_navigation() -> None:
     SEC_params['epsilon'] = 0.05  # DEFAULT FOR MFEC IN ATARI: 0.1
 
     SEC_params['selection_mode'] = 'default'  # selection_mode = ['default', 'argmax']
-    SEC_params['memory_threshold'] = 1  # originally = 4
+    SEC_params['memory_threshold'] = 2  # originally = 4
     ####################################################################################################################
 
     ####################################################################################################################

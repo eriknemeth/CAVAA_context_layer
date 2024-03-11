@@ -36,10 +36,10 @@ class metaAgent():
         action_SORB, Q_SORB = self._SORB.choose_action(state, poss_moves)
 
         # 3) Compare results
-        if Q_SEC >= Q_SORB:
-            return action_SEC, True
-        else:
-            return action_SORB, False
+        #if Q_SEC >= Q_SORB:
+        #    return action_SEC, True
+        #else:
+        #    return action_SORB, False
 
     def learning(self, state: np.ndarray, action: int, new_state: np.ndarray, reward: float) -> bool:
         """
@@ -82,6 +82,7 @@ class metaAgent():
         Returns:
 
         """
+        #self._SEC.toggle_save()
         self._SORB.toggle_save()
         return
 
@@ -95,5 +96,6 @@ class metaAgent():
         Returns:
 
         """
+        self._SEC.dump_agent(path=kwargs.get('path', None), label=kwargs.get('label', None))
         self._SORB.dump_agent(path=kwargs.get('path', None), label=kwargs.get('label', None))
         return
