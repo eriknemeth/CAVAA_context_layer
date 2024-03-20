@@ -56,23 +56,26 @@ class SECagent(object):
         self.entropy = 0.
         self.selection_mode = selection_mode
 
-        self.steps = 0
+        self.total_steps = 0
+        self.episode_steps = 0
+        self.episode_count = 0
         self.exploration_mode = exploration_mode
 
         #print("exploration_mode", exploration_mode)
         self.exploration_steps = exploration_steps # full random exploration time
         self.epsilon = epsilon
 
-        self._save_agent = False  # Initialize save_agent flag
+        self._save_agent = True  # Initialize save_agent flag
         self.unique_states = []
         self.q_values = {}
         self.max_q_values = {}
         self._events = None  # Initialize events DataFrame for saving
-        self.count = 0
+
         if load_ltm: self.load_LTM()
 
     def choose_action(self, state):
         #print("choose action state: ", state)
+        self.episode_steps += 1
 
         if self.exploration_mode == 'default':
             action, q = self.default_step(state)
@@ -109,10 +112,10 @@ class SECagent(object):
         return action, q
 
     def fixed_step(self, state):
-        self.steps += 1
+        self.total_steps += 1
         # For Atari games: Chose CL action after a minimum number of exploration steps have been taken
         action, q = self.action_selection(state)
-        if self.steps < self.exploration_steps:
+        if self.total_steps < self.exploration_steps:
             action = np.random.choice(a=self.action_space)
         return action, q
 
@@ -306,6 +309,8 @@ class SECagent(object):
 
     def reset_memory(self):
         # MEMORY RESET when finishing an episode
+        self.episode_steps = 0
+        self.episode_count += 1
         self.reset_STM()
         self.reset_sequential_bias()
 
@@ -341,7 +346,7 @@ class SECagent(object):
         # Update LTM if reached goal state and still have free space in LTM.
         if (reward_float > 0) and (len(self.LTM[2]) < self.ltm_length):
             #print('REWARD: ', reward_float)
-            #print ("GOAL STATE REACHED! REWARD: ", reward_float)
+            print ("GOAL STATE REACHED! REWARD: ", reward_float)
             self.LTM[0].append([s[0] for s in self.STM])  #append prototypes of STM couplets.
             self.LTM[1].append([a[1] for a in self.STM])  #append actions of STM couplets.
             self.LTM[2].append(reward_float)
@@ -419,7 +424,6 @@ class SECagent(object):
             self.last_actions_indx.append(np.zeros(self.stm_length, dtype='bool').tolist())
 
     def compute_q_table(self):
-        #print("compute_q_table state", self.STM[-1][0])
         # Step 1: Retrieve all unique states experienced from LTM
         #self.unique_states = np.unique(np.array(self.LTM[0]))
         unique_st = set()
@@ -427,19 +431,12 @@ class SECagent(object):
         #print("LTM", list(self.LTM[0]))
         #print("LTM", np.copy(self.LTM[0]))
 
-        #with open('test.npy', 'wb') as f:
-        #    np.save(f, np.array(self.LTM[0]))
-
         for sequence in self.LTM[0]:
             for state_vector in sequence:
                 unique_st.add(tuple(state_vector))
 
         self.unique_states = [list(state_vector) for state_vector in unique_st]
-        #return np.array(unique_states_list)
-
-        #return np.array(list(unique_states))
-
-        #print("self.unique_states:", np.array(list(self.unique_states)))
+        #print("unique_states:", np.array(list(self.unique_states)))
 
         # Step 2: Compute Q values for each state using the estimate_return() function
         self.q_values = {}
@@ -449,91 +446,37 @@ class SECagent(object):
             #print("q_vales", self.q_values)
 
         # Step 3: Save the maximum value of the resulting q values for each state in a new table
-        max_q_values = {}
-        for st, q_value in self.q_values.items():
-            max_q_values[st] = np.max(q_value)
+        #max_q_values = {}
+        #for st, q_value in self.q_values.items():
+        #    max_q_values[st] = np.max(q_value)
 
         # Step 4: Save the max_q table into a csv file
+
         #self.save_max_q_values(max_q_values, 'max_q_values.csv')
-        self.toggle_save()
+        self.save_q_table()
 
-    # All about saving
-    def toggle_save(self, **kwargs) -> None:
-        """
-        Toggles save. If the agent was saving its status so far, it sops doing so. Otherwise, it begins to do so,
-        by already storing a snapshot of the current state as well.
-        Important to note that this function can also be called to extend the saved table in case a new state is
-        encountered.
-        :param kwargs:
-            save_on: If instead of toggling, we want to make sure to turn it on [True] or off [False], we can
-        :return:
-        """
-        save_on = kwargs.get('save_on', not self._save_agent)
-        if save_on:
-            try:
-                try:
-                    s = self.unique_states[-1]  # We need to make it understandable for the environment
-                except AttributeError:
-                    s = len(self.unique_states) - 1
-                if f'Q_{s}_0' not in self.unique_states:  # We added a new state
-                    for s_idx in range(len(self.unique_states)):
-                        for a_idx in range(self.action_space):
-                            try:
-                                s = self.unique_states[s_idx]  # We need to make it understandable for the environment
-                            except AttributeError:
-                                s = s_idx
-                            if f'Q_{s}_{a_idx}' not in self._events.columns:
-                                self._events[f'Q_{s}_{a_idx}'] = np.full((self._events.shape[0], 1), np.nan)
+    def save_q_table(self):
+        # Prepare data for saving
+        event = {'iter': [self.episode_count],
+                 'step': [self.episode_steps],
+                 's': [self.LTM[0][-1][-1]],  # Last state
+                 'a': [self.LTM[1][-1][-1]],  # Last action performed
+                 'r': [self.LTM[2][-1]]}  # Last reward obtained
 
-            except AttributeError:  # There is no such thing as _events
-                poss_states = range(len(self.unique_states))
-                try:
-                    poss_states = range(len(self.unique_states))  # Thus we won't need to translate
-                except AttributeError:
-                    pass
-                Q_names = [f'Q_{s_idx}_{a_idx}' for s_idx in poss_states for a_idx in range(self.action_space)]
-                self._events = pd.DataFrame(columns=['iter', 's', 'r',
-                                                     *Q_names])
-            if not self._save_agent:
-                self._save_agent = True
-                self.__save_step__(True)  # If we just turned it on, we take a snapshot of the agent's current state
+        # Add action Q values of all unique states visited so far
+        for state, q_values in self.q_values.items():
+            for action_idx, q_value in enumerate(q_values):
+                event[f'Q_{np.array(state)}_{action_idx}'] = [q_value]
+
+        # Append the event to the events DataFrame
+        if self._events is None:
+            self._events = pd.DataFrame(event)
         else:
-            self._save_agent = False
+            self._events = pd.concat([self._events, pd.DataFrame(event)])
 
-    def __save_step__(self, virtual=False, s=None, a=None, rew=None):
-        """
-        Saves the current state of the agent by adding a row to the _events memory.
-        :param virtual: is this a virtual step [True] or a real one [False]
-        :param s: last state
-        :param a: last action
-        :param rew: reward
-        """
-        if not self._save_agent:
-            return
-
-        # Which step are we at
-        self.count += 1
-
-        if self._events is not None and self._events.shape[0] > 0:
-            if not virtual:  # If real, it's a new iteration
-                self.count  = self._events['iter'].iloc[-1] + 1
-            else:  # else it's the same iteration but a new step
-                self.count  = self._events['iter'].iloc[-1]
-
-        # Format the event to store
-        event = {'iter': [self.count ], 's': [s], 'a': [a], 'r': [rew]}
-        for state in self.unique_states:
-            for action_idx in range(self.action_space):
-                #event[f'Q_{state}_{action_idx}'] = [self.q_values[state][action_idx]]
-                event[f'Q_{tuple(state)}_{action_idx}'] = [self.q_values[tuple(state)][action_idx]]
-
-
-        # Add it to the table
-        events_temp = pd.DataFrame.from_dict(event).fillna(value=np.nan)
-        if self._events is None or events_temp.empty:
-            self._events = events_temp.copy()
-        else:
-            self._events = pd.concat([self._events, events_temp], ignore_index=True)
+        # Save the events DataFrame to a CSV file
+        self.dump_agent()
+        #self._events.to_csv('SEC_agent_events.csv', index=False)
 
     def dump_agent(self, **kwargs) -> None:
         """
@@ -544,7 +487,7 @@ class SECagent(object):
             label: [str] an additional label to add at the end of the output file name.
         :return:
         """
-        print("_events", self._events)
+        #print("_events", self._events)
         path = kwargs.get('path', None)
         if path is not None:
             if path[-1] != '/':
