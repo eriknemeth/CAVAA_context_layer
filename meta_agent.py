@@ -30,7 +30,7 @@ class metaAgent():
             True if we used the MF agent, False if we used the MB agent
         """
         # 1) MF action selection
-        action_SEC, Q_SEC = self._SEC.choose_action(state)
+        action_SEC, Q_SEC = self._SEC.choose_action(state) 
 
         # 2) MB action selection
         action_SORB, Q_SORB = self._SORB.choose_action(state, poss_moves)
