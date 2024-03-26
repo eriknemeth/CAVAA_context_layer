@@ -647,8 +647,8 @@ class PlotterEnv(Env):
         empty_arr[:] = np.nan
         for s_idx in range(self.state_num()):
             [x, y] = np.argwhere(self._maze == s_idx)[0]
-            if f'Q_({x}, {y})_0' in self._agent_events['SEC'].columns:
-                cols = [f'Q_({x}, {y})_{a_idx}' for a_idx in range(self.act_num())]
+            if f'Q_[{x} {y}]_0' in self._agent_events['SEC'].columns:
+                cols = [f'Q_[{x} {y}]_{a_idx}' for a_idx in range(self.act_num())]
                 SEQ_vals[f'Q_{s_idx}'] = self._agent_events['SEC'][cols].max(axis=1)
             else:
                 SEQ_vals[f'Q_{s_idx}'] = pd.DataFrame(empty_arr,
@@ -736,6 +736,7 @@ class PlotterEnv(Env):
 
         # 2) Looping through the memories
         SEQ_idx = 0
+        overwrite_SEQ = False
         for row_idx in range(1, self._agent_events['SORB'].shape[0]):
             it = int(self._agent_events['SORB']['iter'].iloc[row_idx])
             step = int(self._agent_events['SORB']['step'].iloc[row_idx])
@@ -756,11 +757,18 @@ class PlotterEnv(Env):
             else:
                 curr_replay = np.zeros(self._maze.shape)
             curr_maze = self.__status_to_image__(it)
-            if int(self._agent_events['SORB']['step'].iloc[row_idx-1]) == 0 and \
-               self._agent_events['SORB']['r'].iloc[row_idx-1] > 0:  # If the previous round was rewarded
-                curr_SEQ = self.__event_to_img__(SEQ_vals.iloc[SEQ_idx])
-                max_vals[0] = np.nanmax(SEQ_vals.iloc[SEQ_idx].to_numpy())
-                SEQ_idx += 1
+            if int(self._agent_events['SORB']['step'].iloc[row_idx]) == 0 and \
+               self._agent_events['SORB']['r'].iloc[row_idx] > 0:  # If this round was rewarded
+
+                if sum(self._agent_events['SEC'].step[0:SEQ_idx+1]) != it:
+                    raise ValueError(f"mismatch between SEQ agent and environment memory in row {SEQ_idx}")
+                overwrite_SEQ = True  # But we'll only do it after the potential replay
+            else:
+                if overwrite_SEQ and int(self._agent_events['SORB']['step'].iloc[row_idx]) == 0:  # If the replay is over
+                    curr_SEQ = self.__event_to_img__(SEQ_vals.iloc[SEQ_idx])
+                    max_vals[0] = np.nanmax(SEQ_vals.iloc[SEQ_idx].to_numpy())
+                    overwrite_SEQ = False
+                    SEQ_idx += 1
             curr_Q = self.__event_to_img__(Q_vals.iloc[row_idx])
             curr_Ur = self.__event_to_img__(Ur_vals.iloc[row_idx])
             curr_Ut = self.__event_to_img__(Ut_vals.iloc[row_idx])
