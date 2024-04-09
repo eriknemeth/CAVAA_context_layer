@@ -39,15 +39,20 @@ def spatial_navigation() -> None:
         env_params['save_tag'] = None  # ----------------- What tag should I put on saved data
 
     # About the maze
+    env_params['teleport'] = True  # ---------------------- The agent teleports after getting the reward [True] or not
     env_params['use_epochs'] = False  # ------------------- If [True] we use epochs, if [False] we use steps
     env_params['num_runs'] = steps  # --------------------- How many steps do we model
     env_params['rew_change'] = None  # -------------------- When do we change the reward location (if we do)
     env_params['rew_loc'] = np.array([[4, 0], [1, 8]])  # - What is (are) the rewarded state(s)
-    env_params['rew_val'] = np.array([[1], [5]])  # ------- What is (are) the value(s) of the reward(s)
-    env_params['rew_prob'] = np.array([[1], [1]])  # ------ What is (area) the probability/ies of the reward(s)
+    env_params['rew_mean'] = np.array([[5], [20]])  # ------- What is (are) the value(s) of the reward(s)
+    env_params['rew_std'] = np.array([[1], [1]])  # ------ What is (area) the probability/ies of the reward(s)
     env_params['new_rew_loc'] = None  # ------------------- What is (are) the rewarded state(s)
     env_params['new_rew_val'] = None  # ------------------- What is (are) the value(s) of the reward(s)
     env_params['new_rew_prob'] = None  # ------------------ What is (area) the probability/ies of the reward(s)
+    env_params['wall_loc'] = None  # ---------------------- The wall is between what states (before the change)
+    env_params['wall_change'] = steps * 0.2  # ------------ When do we add a wall (if we do)
+    env_params['new_wall_loc'] = np.array([[[0, 6], [0, 7]],
+                                           [[5, 6], [5, 7]]])  # The wall is between what states (after the change)
     env_params['start_pos'] = np.array([4, 3])  # --------- What state do we start from
     env_params['forbidden_walls'] = False  # -------------- Is it forbidden to bump into walls?
     env_params['restricted_dT'] = False  # ---------------- Is the movement restricted to unidirectional?
@@ -90,6 +95,7 @@ def spatial_navigation() -> None:
     # Then let's define the MB agent's parameters:
     SORB_params = dict()
     SORB_params['actions'] = env_params['actions']  # ------- What are the possible actions
+    SORB_params['curr_state'] = env_params['start_pos']  # -- Where the agent is
 
     # About saving
     SORB_params['save_data'] = True  # ---------------------- Should save the steps taken into a csv?
@@ -98,11 +104,12 @@ def spatial_navigation() -> None:
         SORB_params['save_tag'] = None  # ------------------- What tag should I put on saved data
 
     # About the agent
+    SORB_params['teleport'] = env_params['teleport']  # ----- Do we teleport after each step
     SORB_params['act_num'] = len(SORB_params['actions'])  # - Size of action space # TODO make it adaptive
     SORB_params['model_type'] = 'VI'  # --------------------- 'VI' value iteration or 'TD' temporal difference
     if SORB_params['model_type'] == 'TD':
         SORB_params['alpha'] = 0.8  # ----------------------- from Massi et al. (2022) MF-priority
-    SORB_params['kappa'] = 1  # ----------------------------- Learning rate for the model
+    SORB_params['nV'] = 4  # -------------------------------- The model is updated based on the last nV visits
     SORB_params['gamma'] = 0.9  # --------------------------- Discounting factor
     SORB_params['decision_rule'] = 'softmax'  # ------------- Could be 'max', 'softmax', 'epsilon'
     if SORB_params['decision_rule'] == 'epsilon':
@@ -110,6 +117,9 @@ def spatial_navigation() -> None:
     elif SORB_params['decision_rule'] == 'softmax':
         SORB_params['beta'] = 10  # ------------------------- Beta for softmax
     SORB_params['replay_type'] = 'priority'  # -------------- 'priority', 'trsam', 'bidir', 'backwards', 'forward'
+    SORB_params['replay_every_step'] = True  # -------------- Replay after each step
+    if SORB_params['replay_type'] in ['trsam', 'bidir']:
+        SORB_params['replay_every_step'] = False  # --------- Replay after each epoch
     if SORB_params['replay_type'] in ['priority', 'bidir']:
         SORB_params['event_handle'] = 'sa'  # --------------- What is each new memory compared to [s, sa, sas]
     SORB_params['event_content'] = 'sas'  # ----------------- What is not estimated from model [s, sa, sas, sasr]
@@ -123,16 +133,13 @@ def spatial_navigation() -> None:
 
     ####################################################################################################################
     # Initializing the environment and the agent
-    env = DTMaze(forbidden_walls=env_params['forbidden_walls'],
-                 restricted_dT=env_params['restricted_dT'],
-                 slip_prob=env_params['slip_prob'])
+    env = DTMaze(**env_params)
 
     # 1) Get the first state
     env.place_reward(env_params['rew_loc'],
-                     env_params['rew_val'],
-                     env_params['rew_prob'])
-    state = env.place_agent(env_params['start_pos'])
-    SORB_params['curr_state'] = state
+                     env_params['rew_mean'],
+                     env_params['rew_std'])
+    env.place_wall(env_params['wall_loc'])
 
     META = metaAgent(SEC_params=SEC_params, SORB_params=SORB_params)
     ####################################################################################################################
@@ -145,7 +152,7 @@ def spatial_navigation() -> None:
         META.toggle_save()
 
     # Running the experiment
-    # TODO we have our action space a str here, however the env and the SORB agent use integers. Why is that?
+    state = env.place_agent(env_params['start_pos'])
     step = 0
     pbar = tqdm(total=env_params['num_runs'])
     while step < env_params['num_runs']:
@@ -177,8 +184,13 @@ def spatial_navigation() -> None:
         if step == env_params['rew_change']:
             env.reset_reward()
             env.place_reward(env_params['new_rew_loc'],
-                             env_params['new_rew_val'],
-                             env_params['new_rew_prob'])
+                             env_params['new_rew_mean'],
+                             env_params['new_rew_std'])
+
+        # 7) Change wall location if must
+        if step == env_params['wall_change']:
+            env.reset_wall()
+            env.place_wall(env_params['new_wall_loc'])
 
     # 7) Save for visualization
     if env_params['save_data']:

@@ -1,12 +1,13 @@
 from env import *
 from math import *
 from typing import Union
+import warnings
 
 # If we don't know the state space in advance, adding to _events memory dataframe will produce a performance warning due
 # to "fragmentation". We, however, cannot be bothered at the moment.
-from warnings import simplefilter
-
-simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
+warnings.simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
+# Also, terminal states will produce full-nan C-values that numpy hates
+warnings.simplefilter("ignore", category=RuntimeWarning)
 
 
 def entropy(proba: np.ndarray) -> float:
@@ -29,7 +30,7 @@ class RLagent:
     its memory.
     """
 
-    def __init__(self, act_num: int, curr_state: np.ndarray, model_type: str, gamma: float, kappa: float, decision_rule: str, **kwargs):
+    def __init__(self, act_num: int, curr_state: np.ndarray, model_type: str, gamma: float, nV: float, decision_rule: str, **kwargs):
         """
         Constructor for the basic instance of a Reinforcement Learning Agent.
         Exceptions: ValueError, if the str parameters are invalid
@@ -37,13 +38,14 @@ class RLagent:
         :param curr_state: ID of the current state
         :param model_type: temporal difference ['TD'], value iteration ['VI'] or policy iteration ['PI']
         :param gamma: discounting factor [float]
-        :param kappa: decay factor of EWMA computation of the reward function. Theoretically this is only needed for the
-            MB agent, however, the computation of the entropy will necessitate its use in all cases
+        :param nV: number of visits that will be remembered by the model
         :param kwargs: parameters regarding the decision rule, the replay and the epistemic rewards
             Regarding the model:
                 alpha: learning rat eif model_type is 'TD' [float]
                 beta: for softmax decisions (non-optional) [float]
                 epsilon: for epsilon-greedy decisions (non-optional) [float]
+                teleport: will we teleport after receiving a reward? If True, we have to give special treatment to the
+                    rewarded state
             Regarding the replay:
                 replay_type: "forward", "backward", "priority", "trsam", "bidir" (optional) [str]
                     event_handle: what should we compare a new event to when trying to estimate if we need to
@@ -78,8 +80,9 @@ class RLagent:
         self._nA = act_num  # max number of possible actions per state
 
         # The parameters of the agent
+        self._teleport = kwargs.get('teleport', True)
         self._gamma = gamma
-        self._kappa = kappa
+        self._nV = nV
         self._model_type = model_type
         self._decision_rule = decision_rule
         if self._decision_rule == "softmax":
@@ -100,15 +103,16 @@ class RLagent:
         #                          entropy(np.ones(2) / 2) / (1 - self._gamma),  # Ur max
         #                          entropy(np.ones(self._nS) / self._nS) / (1 - self._gamma)])  # Ut max
         self._maxval = np.array([0,  # Qmax
-                                 entropy(np.ones(2) / 2) / (1 - self._gamma),  # Ur max
+                                 1,  # Ur max  # TODO proper initialization
                                  entropy(np.ones(self._nS) / self._nS) / (1 - self._gamma)])  # Ut max
-        self._N = np.zeros((self._nS, self._nA, self._nS))  # Number of visits
+        self._Thist = np.zeros((self._nS, self._nA, self._nS, self._nV))  # Number of visits
+        self._Rhist = np.zeros((self._nS, self._nA, self._nV))  # The reward history
         self._T = np.ones((self._nS, self._nA, self._nS)) / self._nS  # Transition probs
-        self._Pr = np.ones((self._nS, self._nA)) / 2  # Reward probs (not the expected reward but the proba of r > 0)
+        # self._Pr = np.ones((self._nS, self._nA)) / 2  # Reward probs (not the expected reward but the proba of r > 0)
         # TODO R initialization
         self._R = np.zeros((self._nS, self._nA, 3))  # Reward function [R, deltaHr, deltaHt]
         # self._R[:, :, 0] = self._maxrew  # R is initialized to max for optimism
-        self._R[:, :, 1] = entropy(np.ones(2) / 2)  # Delta Hr is initialized to max for optimism
+        self._R[:, :, 1] = 1  # Delta Hr is initialized to max for optimism  # TODO proper initialization
         self._R[:, :, 2] = entropy(np.ones(self._nS) / self._nS)  # Delta Ht is initialized to max too
         self._C = np.zeros((self._nS, self._nA, 3))  # Quality values [Q, Ur, Ut]
         # TODO C initialization
@@ -197,24 +201,20 @@ class RLagent:
         :return: the entropy. If we requested a type of entropy the agent does not keep track of (e.g. 'rew' while the
             agent does not even consider rew entropy, the return value is None)
         """
-        if mode not in ['rew', 'trans']:
+        if mode not in ['trans']:
             raise ValueError('Only transition and reward entropy can be computed this way.')
-        if mode == 'rew':
-            return entropy(np.array([self._Pr[s, a], 1 - self._Pr[s, a]]))
+        # if mode == 'rew':
+        #     return entropy(np.array([self._Pr[s, a], 1 - self._Pr[s, a]]))
         return entropy(self._T[s, a, :])
 
-    def __combine_C__(self, **kwargs) -> Union[np.ndarray, float]:
+    def __C_vector__(self, s: int, a: int, **kwargs) -> np.ndarray:
         """
-        Combines the normalized Q and U values based on the pre-defined ratio for state. This will only be used
+        Computes the normalized Q and U values based on the pre-defined ratio for state. This will only be used
         to assess the priority of certain updates, that is Q values will be stored and updated in the usual fashion.
-        This function can be used with 2 different sets of input variables (s, a; or Q, Ur, Ut)
-        If the (s, a) couple is defined, we will compute the exact C value (norm in the C-space). If it is the
-        (Q, Ur, Ut) vector, we consider it a delta C vector, and in that case we take the ABSOLUTE VALUE of each
-        dimension to compute the ABSOLUTE CHANGE.
+        If the (s, a) couple is defined, we will compute the exact C value (norm in the C-space)
         :return: the combined value normalized between 0 and 1; or the combined delta value normalized between -1 and 1
+        :param s, a: the state-action couple whose C-value we want to compute [int] OR
         :param kwargs:
-            s, a: the state-action couple whose C-value we want to compute [int] OR
-            deltaC: a vector contianing the Q, Ur and Ut values [np.ndarray of float]
             replay: a boolean deciding whether we're combining quality values for replay purposes or not. If [True],
                 rep_weights will be used (to use during every inference step). If [False], dec_weights will be used (to
                 use during action selection, if it takes place in the real world). Defaults to [False].
@@ -222,17 +222,10 @@ class RLagent:
         weights = self._dec_weights
         if kwargs.get('replay', False):
             weights = self._rep_weights
-        C_vector = kwargs.get('deltaC', None)
-        if C_vector is None:
-            s = kwargs.get('s', None)
-            a = kwargs.get('a', None)
-            if s is None or a is None:
-                raise ValueError('To combine the C value, either the quality values or a state-action couple needs to '
-                                 'be specified.')
-            C_vector = self._C[s, a, :]
-        else:
-            C_vector = abs(C_vector)
-        return np.sum(C_vector / self._maxval * weights)
+        C_vector = self._C[s, a, :]
+        maxval = np.copy(self._maxval)
+        maxval[maxval == 0] = 1
+        return C_vector / maxval * weights
 
     def __amax_C__(self) -> np.ndarray:
         """
@@ -246,7 +239,7 @@ class RLagent:
                 # TODO if we have no possible action, should we return the max over all actions, or maybe 0?
                 a_poss = np.array(range(self._nA))
             C_temp = self._C[s_idx, a_poss, :]
-            max_C[s_idx, :] = np.amax(C_temp, axis=0)
+            max_C[s_idx, :] = np.nanmax(C_temp, axis=0)
         return max_C
 
     def __pop_memory__(self) -> np.ndarray:
@@ -290,10 +283,11 @@ class RLagent:
         if self._replay_type == "trsam":
             return  # No need to store anything
 
-        # 1) Sub-threshold elements won't be stored for pr/bidir
+        # 1) Sub-threshold elements will be deleted for pr/bidir
+        to_delete = False
         if abs(deltaC) <= self._replay_thresh and self._replay_type in ['priority', 'bidir']:
             # TODO we might want to change it so that only the significant elements are stored for fd/bd too
-            return
+            to_delete = True
         to_store = np.array([[s, a, s_prime, rew[0], rew[1], rew[2], deltaC]])  # this is our new row
         empty_idx = np.where(np.all(self._memory_buff == 0, axis=1))[0]  # IDX of all empty rows
 
@@ -318,12 +312,12 @@ class RLagent:
             # remove the old copy, and then add the new one just like normal
 
             # 2.a.1) First question: is the original copy better, or do I want to overwrite?
-            if abs(self._memory_buff[memory_idx[0], -1] > abs(deltaC)):
-                # If the original copy is better, we keep it
-                # TODO maybe we want to overwrite the pre-existing copy for pr/bidir, even if the new is worse? I think
-                #  not, because that could mean we might want to even delete the entry, which is a problem; plus we
-                #  might end up decreasing the importance of a state cuz we took an insignificant action
-                return
+            # if abs(self._memory_buff[memory_idx[0], -1] > abs(deltaC)):
+            #     # If the original copy is better, we keep it
+            #     # TODO maybe we want to overwrite the pre-existing copy for pr/bidir, even if the new is worse? I think
+            #     #  not, because that could mean we might want to even delete the entry, which is a problem; plus we
+            #     #  might end up decreasing the importance of a state cuz we took an insignificant action
+            #     return
             # Otherwise just scrape the old row and shift the elements so that the empty row is at the
             # bottom of the array
             self._memory_buff[memory_idx[0], :] = np.zeros((1, 7))  # delete the pre-existing copy
@@ -342,10 +336,18 @@ class RLagent:
         else:
             # 2.b) It's either pr/bidir and no pre-existing copy was found in the buffer, or it is not prioritized --
             # this means we have to ADD the new element to the buffer no matter what
-            if empty_idx.size == 0 and self._max_replay is None:
-                # 2.b.1) If full but infinite, we expand. Otherwise, nothing will happen
+            if empty_idx.size == 0 and self._max_replay is None and not to_delete:
+                # 2.b.1) If full but infinite (and we want to store it), we expand. Otherwise, nothing will happen
                 self._memory_buff = np.append(self._memory_buff, np.zeros((1, 7)), axis=0)
                 empty_idx = np.array([self._memory_buff.shape[0] - 1])
+
+        if to_delete:
+            # I either deleted a copy (pr/bidir) or have found none. For an insignificant memory, it is time to return
+            if self._max_replay is None and memory_idx is not None and memory_idx.size != 0:
+                # If there was a copy before -- in an infinite memory -- that we removed, then there is an empty row at
+                # the bottom to get rid of
+                self._memory_buff = np.delete(self._memory_buff, obj=-1, axis=0)
+            return
 
         # 3) Now all we have to do is insert the new element at its proper place
         if self._replay_type in ["backward", "priority", "bidir"]:
@@ -384,7 +386,7 @@ class RLagent:
         """
         # Since we got a new state, the transition model needs to be rescaled completely; as for the reward model, the
         # new state is maximally uncertain
-        maxval_old = self._maxval[2]
+        maxval_old = self._maxval[2] if self._maxval[2] != 0 else 1
         self._maxval[2] = entropy(np.ones(self._nS + 1) / (self._nS + 1)) / (1 - self._gamma)
         self._maxval[1] = entropy(np.ones(2) / 2) / (1 - self._gamma)
 
@@ -396,8 +398,9 @@ class RLagent:
                                                 for _ in range(self._nA)]]), axis=0)
 
         # Now the model
-        self._N = np.append(self._N, np.zeros((self._nS, self._nA, 1)), axis=2)
-        self._N = np.append(self._N, np.zeros((1, self._nA, self._nS + 1)), axis=0)
+        self._Thist = np.append(self._Thist, np.zeros((self._nS, self._nA, 1, self._nV)), axis=2)
+        self._Thist = np.append(self._Thist, np.zeros((1, self._nA, self._nS + 1, self._nV)), axis=0)
+        self._Rhist = np.append(self._Rhist, np.zeros((1, self._nA, self._nV)), axis=0)
         # self._T *= self._nS / (self._nS + 1)  # Rescaling the probabilities
         # self._T = np.append(self._T, 1 - np.sum(self._T, axis=2, keepdims=True), axis=2)  # Transition to new state
         # self._T = np.append(self._T, np.ones((1, self._nA, self._nS + 1)) / (self._nS + 1),
@@ -406,11 +409,11 @@ class RLagent:
         self._T = np.append(self._T, np.zeros((self._nS, self._nA, 1)), axis=2)  # Transition to new state
         self._T = np.append(self._T, np.ones((1, self._nA, self._nS + 1)) / (self._nS + 1),
                             axis=0)  # Tr from new state
-        self._Pr = np.append(self._Pr, np.ones((1, self._nA)) / 2, axis=0)
+        # self._Pr = np.append(self._Pr, np.ones((1, self._nA)) / 2, axis=0)
         # TODO decide on the initialization for R
         # R will be initialized to [0, max, max]
         self._R = np.append(self._R,
-                            np.array([[[0, entropy(np.ones(2) / 2), entropy(np.ones(self._nS) / self._nS)]
+                            np.array([[[0, 1, entropy(np.ones(self._nS) / self._nS)]
                                        for _ in range(self._nA)]]), axis=0)
 
         self._nS += 1
@@ -429,11 +432,20 @@ class RLagent:
         :return: prediction error
         """
         # TD_error = rew + self._gamma * np.max(self._C[s_prime, :, :], axis=0) - self._C[s, a, :]
+        C_curr = self.__C_vector__(s=s, a=a, replay=True)
         C_max = self.__amax_C__()  # This way impossible actions (with U-value initialized to max) won't affect it
+        if self.__isterminal__(s_prime):
+            C_max[s_prime] = 0  # Basically there is no C value assigned to this state
         TD_error = rew + self._gamma * C_max[s_prime] - self._C[s, a, :]
         self._C[s, a, :] += self._alpha * TD_error
+        # The maximum will be updated here, meaning that C-values are always normalized based on the current max
+        # TODO if I keep the current maximum of the U values as maxval, then
+        #  small uncertainties will slowly become more and more important as they scale up. However, if I keep the
+        #  historical maximum, then, for the normal Q values, what happens if the reward decreases?
+        self._maxval = np.nanmax(np.array([self._maxval, np.nanmax(self.__amax_C__(), axis=0)]), axis=0)
+        # self._maxval[self._maxval == 0] = 1  # It's only used for normalization
         # Now we want to return the norm of the TD error, combined in a way to make it comparable to the replay buffer
-        return self.__combine_C__(deltaC=TD_error, replay=True)
+        return np.sum(abs(self.__C_vector__(s=s, a=a, replay=True) - C_curr))
 
     # Hidden methods for MB learning
     def __MB_update__(self, s: int, a: int, val_func: np.ndarray) -> np.ndarray:
@@ -444,6 +456,7 @@ class RLagent:
         :param val_func: value function by which we update (Q or V, depending the self._model_type)
         :return: the new C value in a 3-by-1 array???
         """
+        val_func[np.isnan(val_func)] = 0  # Terminal states should not propagate any further Q-value back
         return self._R[s, a, :] + self._gamma * np.dot(np.reshape(self._T[s, a, :], (1, self._nS)), val_func)
 
     def __value_iteration__(self, s: int, a: int) -> float:
@@ -454,11 +467,14 @@ class RLagent:
         :return: the difference in the Q value after update
         """
         # C_max = np.amax(self._C, axis=1)  # [nS x 3] array instead of [nS x 1 x 3] (otherwise use keepdims=True)
+        C_curr = self.__C_vector__(s=s, a=a, replay=True)
         C_max = self.__amax_C__()  # [nS x 3] array, impossible actions (with Uvalue initialized to max) won't affect it
-        C_old = np.copy(self._C[s, a, :])
         self._C[s, a, :] = self.__MB_update__(s=s, a=a, val_func=C_max)
+        # TODO same as TDError
+        self._maxval = np.nanmax(np.array([self._maxval, np.nanmax(self.__amax_C__(), axis=0)]), axis=0)
+        # self._maxval[self._maxval == 0] = 1  # It's only used for normalization
         # Now we want to return the norm of the TD error, combined in a way to make it comparable to the replay buffer
-        return self.__combine_C__(deltaC=self._C[s, a, :] - C_old, replay=True)
+        return np.sum(abs(self.__C_vector__(s=s, a=a, replay=True) - C_curr))
 
     def __policy_iteration__(self, s: int, u: int) -> Tuple[float, np.ndarray]:
         """
@@ -487,10 +503,19 @@ class RLagent:
         """
         for a_pred in range(self._nA):
             s_pred = self._T[:, a_pred, s]
-            s_pred = np.nonzero(np.logical_and(s_pred > 0, self._N[:, a_pred, s] > 0))
-            if s_pred[0].size != 0 and np.any(self._R[s_pred, a_pred, 0] > 0):  # if we can get here AND rewarded
+            s_pred = np.nonzero(np.logical_and(s_pred > 0, np.sum(self._Thist[:, a_pred, s, :], axis=1) > 0))
+            if s_pred[0].size != 0 and np.sum(self._Rhist[s_pred, a_pred, :]) > 0:  # if we can get here AND rewarded
                 return True
         return False
+
+    def __isterminal__(self, s: int) -> bool:
+        """
+        Returns whether a given state is terminal or not. A terminal state is a state that is rewarded in case of
+        teleport == True
+        :param s: The state in question
+        :return: Terminal [True] or not [False]
+        """
+        return self._teleport and np.isnan(np.sum(self._C[s, :, :]))
 
     def __find_predecessors__(self, s: int, p: float) -> None:
         """
@@ -511,11 +536,14 @@ class RLagent:
         for a_pred in range(self._nA):
             # 1) For every possible "predecessor" step, leading to s we find all predecessor states
             s_all = np.array(range(self._nS))
-            s_mask_reachable = np.logical_and(self._N[:, a_pred, s] > 0, self._T[:, a_pred, s] > 0)
+            s_mask_reachable = np.logical_and(np.sum(self._Thist[:, a_pred, s, :], axis=1) > 0,
+                                              self._T[:, a_pred, s] > 0)
             s_all = s_all[s_mask_reachable]
             for s_pred in s_all:
                 # 2) For all predecessor states we back propagate the priority level. store_in_memory will ofc not store
                 # sub-threshold events
+                if self.__isterminal__(s_pred):
+                    continue
                 p_pred = p * self._gamma * self._T[s_pred, a_pred, s]
                 self.__store_in_memory__(s_pred, a_pred, s, self._R[s_pred, a_pred, :], p_pred)
 
@@ -537,7 +565,7 @@ class RLagent:
         poss_moves = np.array(range(self._nA))  # moves that are physically possible, as far as we know
         # 1.a) let's remove all illegal steps (according to our knowledge)
         for a_idx in range(self._nA):
-            illegal = np.sum(self._N[s, a_idx, :]) == 0  # haven't taken this step yet
+            illegal = np.sum(np.sum(self._Thist[s, a_idx, :, :], axis=1)) == 0  # haven't taken this step yet
             if self._forbidden_walls:
                 illegal = illegal or np.argmax(a_s_prime[a_idx, :]) == s
             if illegal:
@@ -609,7 +637,7 @@ class RLagent:
                 if curr_s != s_prime:  # If we stay in place, let's not update anything
                     prev_s = curr_s
                     curr_s = s_prime
-            if len(actions_to_choose) == 0 or curr_s in stop_loc or rew[0] > 0 or self.__isrewarded__(curr_s):
+            if len(actions_to_choose) == 0 or curr_s in stop_loc or self.__isterminal__(curr_s):
                 if abs(max_delta) > self._replay_thresh:
                     curr_s = s
                     max_delta = 0
@@ -670,7 +698,7 @@ class RLagent:
                 event[f'Q_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 0]]
                 event[f'Ur_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 1]]
                 event[f'Ut_{s}_{a_idx}'] = [self._C[s_idx, a_idx, 2]]
-                event[f'C_{s}_{a_idx}'] = [self.__combine_C__(s=s_idx, a=a_idx)]
+                event[f'C_{s}_{a_idx}'] = [np.sum(self.__C_vector__(s=s_idx, a=a_idx))]
 
         # 3) Add it to the table
         events_temp = pd.DataFrame.from_dict(event).fillna(value=np.nan)
@@ -682,7 +710,7 @@ class RLagent:
         return
 
     # Methods used to instruct the agent
-    def choose_action(self, s: int, a_poss: np.ndarray, **kwargs) -> Tuple[int, float]:
+    def choose_action(self, s: np.ndarray, a_poss: np.ndarray, **kwargs) -> Tuple[int, float]:
         """
         Chooses actions from the available ones from a predefined state and the set of available actions observed from
         env. The action choice will depend on the decision rule. We might use a softmax function, a greedy choice by Q,
@@ -704,22 +732,24 @@ class RLagent:
             # Simplest case, we choose randomly
             if np.random.uniform(0, 1, 1) <= self._epsilon:
                 a = np.random.choice(a_poss)
-                return int(a), self._C[s, a, 0] #  self.__combine_C__(s=s, a=a)
+                return int(a), self._C[s, a, 0]  # np.sum(self.__C_vector__(s=s, a=a))]
 
         # 2) For the other methods combine all the potential constituents
-        C_poss = np.array([self.__combine_C__(s=s, a=idx_a, replay=virtual) for idx_a in a_poss])
+        C_poss = np.array([np.sum(self.__C_vector__(s=s, a=idx_a, replay=virtual)) for idx_a in a_poss])
         # C_poss is between 0 and 1
+        if self.__isterminal__(s):  # In case this is the first time we're leaving this terminal state
+            C_poss = np.zeros(C_poss.shape)
 
         # 3) If we choose to put these combined values through a softmax
         if self._decision_rule == "softmax":
             p_poss = np.exp(self._beta * C_poss) / np.sum(np.exp(self._beta * C_poss))
             a = np.random.choice(a_poss, p=p_poss)
-            return int(a), self._C[s, a, 0] #  self.__combine_C__(s=s, a=a)
+            return int(a), self._C[s, a, 0] #  np.sum(self.__C_vector__(s=s, a=a))]
 
         # 4) If we choose the maximum (either due to greedy or epsilon greedy policies)
         a_poss = a_poss[C_poss == max(C_poss)]
         a = np.random.choice(a_poss)
-        return int(a), self._C[s, a, 0] #  self.__combine_C__(s=s, a=a)
+        return int(a), self._C[s, a, 0] #  np.sum(self.__C_vector__(s=s, a=a))]
 
     def model_learning(self, s: np.ndarray, a: int, s_prime: np.ndarray, r: float) -> Tuple[float, float]:
         """
@@ -738,36 +768,52 @@ class RLagent:
         s, s_prime = self.__translate_s__(s), self.__translate_s__(s_prime)
 
         # Let's store the current entropy values for epistemic rewards
-        Hr = self.__entropy__(s, a, 'rew')
+        # Hr = self.__entropy__(s, a, 'rew')
+        std = np.std(self._Rhist[s, a, :])
         Ht = self.__entropy__(s, a, 'trans')
 
         # Then we just update
         # a) the Transition function
-        self._N[s, a, s_prime] += 1
-        self._T[s, a, :] = (1 - 1 / np.sum(self._N[s, a, :])) * self._T[s, a, :] \
-                           + np.reshape(np.array(range(self._nS)) == s_prime, (1, 1, self._nS)) \
-                           / np.sum(self._N[s, a, :])
+        # self._N[s, a, s_prime] += 1
+        # self._T[s, a, :] = (1 - 1 / np.sum(self._N[s, a, :])) * self._T[s, a, :] \
+        #                    + np.reshape(np.array(range(self._nS)) == s_prime, (1, 1, self._nS)) \
+        #                    / np.sum(self._N[s, a, :])
+        curr_Thist = self._Thist[s, a, :, :]
+        curr_V = np.where(np.sum(curr_Thist, axis=0) == 0)[0]
+        full = False
+        if curr_V is not None and curr_V.size != 0:
+            curr_V = curr_V[0]
+        else:
+            curr_V = self._nV - 1
+            curr_Thist = np.roll(curr_Thist, -1, axis=1)
+            full = True
+        curr_Thist[:, curr_V] = np.zeros(self._nS)
+        curr_Thist[s_prime, curr_V] = 1
+        self._Thist[s, a, :, :] = curr_Thist  # We need this because roll creates a copy instead of a reference
+
+        self._T[s, a, :] = np.sum(self._Thist[s, a, :, :], axis=1) / np.sum(self._Thist[s, a, :, :])
 
         # b) the reward function
-        # TODO for both the Pr and the R function, here is a version using a stochastic averaging and an exponentially
-        #  weighted moving average method. The problem with the former is that in case of a change in the reward
-        #  positions after N steps, it will take another N steps to unlearn the original pattern (SAME GOES FOR THE T
-        #  FUNCTION ABOVE!!!). As for the latter solution, it necessitates yet another parameter (kappa) that we might
-        #  want to get rid of, furthermore, the epistemic reward is now double-discounted by kappa (learning Pr and THEN
-        #  Ht/Hr as part of the reward function). Is there a Bayesian solution to this?
         # self._Pr[s, a] = (1 - 1 / np.sum(self._N[s, a, :])) * self._Pr[s, a] + float(r > 0) / np.sum(self._N[s, a, :])
-        self._Pr[s, a] = (1 - self._kappa) * self._Pr[s, a] + self._kappa * float(r > 0)  # EWMA
+        # self._Pr[s, a] = (1 - self._kappa) * self._Pr[s, a] + self._kappa * float(r > 0)  # EWMA
+        # Dromnelle-inspired:
+        curr_Rhist = self._Rhist[s, a, :]
+        if full:
+            curr_Rhist = np.roll(curr_Rhist, -1, axis=0)
+        curr_Rhist[curr_V] = r
+        self._Rhist[s, a, :] = curr_Rhist  # We need this because roll creates a copy instead of a reference
+        # self._Pr[s, a] = np.sum(self._Rhist[s, a, :] > 0) / self._nV
 
-        hr = Hr - self.__entropy__(s, a, 'rew')  # negative change!
-        ht = Ht - self.__entropy__(s, a, 'trans')
+        r = np.sum(self._Rhist[s, a, :]) / self._nV
+        # hr = abs(Hr - self.__entropy__(s, a, 'rew'))  # absolute change!
+        hr = abs(std - np.std(self._Rhist[s, a, :]))  # absolute change!
+        ht = abs(Ht - self.__entropy__(s, a, 'trans'))
         rew = np.array([r, hr, ht])
 
         # self._R[s, a, :] = (1 - 1 / np.sum(self._N[s, a, :])) * self._R[s, a, :] + rew / np.sum(self._N[s, a, :])
-        self._R[s, a, :] = (1 - self._kappa) * self._R[s, a, :] + self._kappa * rew  # EWMA
+        # self._R[s, a, :] = (1 - self._kappa) * self._R[s, a, :] + self._kappa * rew  # EWMA
+        self._R[s, np.array(range(self._nA)) == a, :] = rew
 
-        # Taking care of the overestimation of uncertainty # TODO is this the right way of doing so
-        if r > 0:
-            self._C[s_prime, :, 1:] = 0
         return hr, ht
 
     def inference(self, s: np.ndarray, a: int, s_prime: np.ndarray, rew: np.ndarray, **kwargs) -> bool:
@@ -794,6 +840,15 @@ class RLagent:
             s, s_prime = self.__translate_s__(s), self.__translate_s__(s_prime)
             # Extend the state space if needed
 
+            # 0) A terminal state is defined as a state in which all C values are nan's
+            # First, if we meet a rewarded state and action, make the arriving state terminal
+            if self._teleport and rew[0] > 0:
+                self._C[s_prime, :, :] = np.nan
+
+            # Second, if the state we just left is terminal, we might want to make it non-terminal (since we just left)
+            if self.__isterminal__(s):
+                self._C[s, :, :] = 0
+
         # 1) learn Q val (each model will do its own thing)
         delta_C = 0
         if self._model_type == 'TD':
@@ -802,13 +857,6 @@ class RLagent:
             delta_C = self.__value_iteration__(s, a)
         elif self._model_type == "PI":
             delta_C = self.__policy_iteration__(s, a)
-        # TODO: 2 questions. 1, I update the maxvals here, after having computed the delta C. Is that a problem?
-        #  Should I do it before? Delta C consists of the prior and posterior estimates of the C values, so should I
-        #  normalize them the same or differently? 2, if I keep the current maximum of the U values as maxval, then
-        #  small uncertainties will slowly become more and more important as they scale up. However, if I keep the
-        #  historical maximum, then, for the normal Q values, what happens if the reward decreases?
-        self._maxval = np.maximum(self._maxval, np.amax(self.__amax_C__(), axis=0))
-        self._maxval[self._maxval == 0] = 1  # It's only used for normalization
 
         # 4) Store if needed
         if update_buffer:
@@ -822,7 +870,8 @@ class RLagent:
 
         # Performing memory replay
         replayed = False
-        if not virtual and self._replay_type in ['forward', 'backward', 'priority'] and abs(delta_C) > self._replay_thresh:
+        if not virtual and self._replay_type in ['forward', 'backward', 'priority'] \
+                and abs(delta_C) > self._replay_thresh:
             self.memory_replay(s=s)
             replayed = True
 
@@ -893,28 +942,31 @@ class RLagent:
             # Based on whether we consider events as recollections of s, or (s, a), the rest will be filled by the
             # model
             s = int(event[0])
-            if self._event_content in ['sa', 'sas', 'sasr']:
-                a = int(event[1])
-            else:
-                a_poss = self.__find_good_actions__(s)
-                # If we are replaying a state without having explored the actions leading out of it, then we'll find no
-                # action to choose. In this case we need to move to the next element in the memory
-                # This scenario is impossible if we allow bumping into walls
-                if len(a_poss) == 0:
-                    if self._replay_type in ['forward', 'backward']:
-                        it += 1
-                    continue
-                a = self.choose_action(s, a_poss, virtual=True)
-            if self._event_content in ['sas', 'sasr']:
-                s_prime = int(event[2])
-            else:
-                s_prime = np.random.choice(list(range(self._nS)), p=self._T[s, a, :])
-            if self._event_content == 'sasr':
-                rew = event[3:6]
-            else:
-                rew = self._R[int(event[0]), int(event[1]), :].squeeze()
-            delta_curr = self.inference(s=s, a=a, s_prime=s_prime, rew=rew,
-                                        virtual=True, update_buffer=update_buffer)
+            delta_curr = 0
+            if not self.__isterminal__(s):
+                if self._event_content in ['sa', 'sas', 'sasr']:
+                    a = int(event[1])
+                else:
+                    a_poss = self.__find_good_actions__(s)
+                    # If we are replaying a state without having explored the actions leading out of it, then we'll find no
+                    # action to choose. In this case we need to move to the next element in the memory
+                    # This scenario is impossible if we allow bumping into walls
+                    if len(a_poss) == 0:
+                        if self._replay_type in ['forward', 'backward']:
+                            it += 1
+                        continue
+                    a = self.choose_action(s, a_poss, virtual=True)
+                if self._event_content in ['sas', 'sasr']:
+                    s_prime = int(event[2])
+                else:
+                    s_prime = np.random.choice(list(range(self._nS)), p=self._T[s, a, :])
+                if self._event_content == 'sasr':
+                    rew = event[3:6]
+                else:
+                    rew = self._R[int(event[0]), int(event[1]), :].squeeze()
+                delta_curr = self.inference(s=s, a=a, s_prime=s_prime, rew=rew,
+                                            virtual=True, update_buffer=update_buffer)
+                it += 1  # This is where I count the iterations, as I wanna know the number of actual inferences
 
             # 1.4) Conclude by some final step
             if self._replay_type in ["priority", "bidir"]:
@@ -929,7 +981,6 @@ class RLagent:
                 if buffer_idx >= self._memory_buff.shape[0]:
                     # No need to take care of arriving at an empty row, that's handled in 1.2.b)
                     buffer_idx = 0
-            it += 1
 
         # 2) If bidir, let's run some simulations using the remaining steps
         if self._replay_type == 'bidir':

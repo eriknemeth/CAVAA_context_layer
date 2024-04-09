@@ -32,19 +32,25 @@ class Env:
         # The encoding of the maze -- 0 represents a wall, a number represents an available state
         self._maze = np.array([])
         # What is the value of each state defined above
-        self._reward = np.array([])
+        self._rew_mean = np.array([])
         # What is the likelihood of getting a reward in each state
-        self._reward_prob = np.array([])
+        self._rew_std = np.array([])
         # Where te agent is right now
         self._agent_pos = np.array([])
         # Are there any forbidden actions (following the coding of _act) -- for every state specify a vector of
         # length m. 0 means no restriction, 1 means forbidden action in said state
         self._restrict = np.array([])
+        # Do I restrict bumping into walls?
+        self._forbidden_walls = False
+        # The walls that we might slip in between states. Operates the same as restrict
+        self._walls = np.array([])
         # Probability of slipping (stochastic transitioning)
         self._slip_prob = 0
         # About storing the data
         self._save_env = False
         self._events = None
+        self._teleport = None
+        self._start_pos = None
         return
 
     # Hidden functions for several upkeep purposes
@@ -82,7 +88,9 @@ class Env:
         :param a: the action chosen
         :return: the coordinates of the arrival state
         """
-        [x_prime, y_prime] = np.array([x, y]) + self._act[a]
+        [x_prime, y_prime] = np.array([x, y])
+        if np.sum(self._walls) == 0 or self._walls[x, y, a] == 0:
+            [x_prime, y_prime] = np.array([x, y]) + self._act[a]
         return np.array([x_prime, y_prime]).astype(int)
 
     def __slip__(self, x: int, y: int, x_prime: int, y_prime: int) -> np.array:
@@ -138,12 +146,25 @@ class Env:
         event['agent_pos_x'] = [agent[0, 0]]
         event['agent_pos_y'] = [agent[0, 1]]
         event['SEC_winner'] = SEC_winner
-        rewards = np.argwhere(self._reward > 0)
+        rewards = np.argwhere(self._rew_mean > 0)
         for rew_idx in range(rewards.shape[0]):
             event[f'rew{rew_idx}_pos_x'] = [rewards[rew_idx, 0]]
             event[f'rew{rew_idx}_pos_y'] = [rewards[rew_idx, 1]]
-            event[f'rew{rew_idx}_val'] = [self._reward[rewards[rew_idx, 0], rewards[rew_idx, 1]]]
-            event[f'rew{rew_idx}_proba'] = [self._reward_prob[rewards[rew_idx, 0], rewards[rew_idx, 1]]]
+            event[f'rew{rew_idx}_mean'] = [self._rew_mean[rewards[rew_idx, 0], rewards[rew_idx, 1]]]
+            event[f'rew{rew_idx}_std'] = [self._rew_std[rewards[rew_idx, 0], rewards[rew_idx, 1]]]
+
+        # As for the walls
+        wall_states = self._maze[np.sum(self._walls, axis=2) > 0]
+        for s0 in wall_states:
+            [x0, y0] = np.argwhere(self._maze == s0)[0]
+            for a0 in self._act[self._walls[x0, y0, :] > 0]:
+                coord1 = np.array([x0, y0]) + a0
+                s1 = self._maze[coord1[0], coord1[1]]
+                if f'wall_{s0}_{s1}' in self._events.columns:  # If we don't have it, then we have wall_s1_s0
+                    event[f'wall_{s0}_{s1}'] = 1
+        for col_name in self._events.columns:
+            if col_name[0:5] == 'wall_' and col_name not in event:
+                event[col_name] = 0
 
         # 3) Add it to the table
         events_temp = pd.DataFrame.from_dict(event).fillna(value=np.nan)
@@ -185,27 +206,27 @@ class Env:
         """
         return len(self._act)
 
-    def max_rew(self, **kwargs) -> float:
-        """
-        Returns the maximal obtainable reward from the maze. If 'iter' is defined, it returns the same for a past
-        iteration.
-        :param kwargs:
-            iter: what past iteration we want to know the max reward of
-        :return: max of reward
-        """
-        it = kwargs.get('iter', None)
-        if it is not None:
-            if it not in self._events['iter'].values:
-                raise ValueError(f'Step {it} has not yet been taken')
-            curr_row = self._events.loc[self._events['iter'] == it, :].reset_index(drop=True)
-            max_rew = 0
-            rew_idx = 0
-            while f'rew{rew_idx}_val' in self._events.columns:
-                if curr_row.at[0, f'rew{rew_idx}_val'] > max_rew:
-                    max_rew = curr_row.at[0, f'rew{rew_idx}_val']
-                rew_idx += 1
-            return max_rew
-        return np.max(self._reward)
+    # def max_rew(self, **kwargs) -> float:
+    #     """
+    #     Returns the maximal obtainable reward from the maze. If 'iter' is defined, it returns the same for a past
+    #     iteration.
+    #     :param kwargs:
+    #         iter: what past iteration we want to know the max reward of
+    #     :return: max of reward
+    #     """
+    #     it = kwargs.get('iter', None)
+    #     if it is not None:
+    #         if it not in self._events['iter'].values:
+    #             raise ValueError(f'Step {it} has not yet been taken')
+    #         curr_row = self._events.loc[self._events['iter'] == it, :].reset_index(drop=True)
+    #         max_rew = 0
+    #         rew_idx = 0
+    #         while f'rew{rew_idx}_val' in self._events.columns:
+    #             if curr_row.at[0, f'rew{rew_idx}_val'] > max_rew:
+    #                 max_rew = curr_row.at[0, f'rew{rew_idx}_val']
+    #             rew_idx += 1
+    #         return max_rew
+    #     return np.max(self._reward)
 
     # Communication towards the agent
 
@@ -269,8 +290,10 @@ class Env:
         # Generating reward
         # TODO stepping onto our out of the rewarding stare?
         rew = 0
-        if random.uniform(0, 1) < self._reward_prob[x_prime, y_prime]:  # for any act leading into the rewarded state
-            rew = self._reward[x_prime, y_prime]
+        if self._rew_mean[x_prime, y_prime] > 0:
+            rew = np.random.normal(self._rew_mean[x_prime, y_prime], self._rew_std[x_prime, y_prime])
+        # if random.uniform(0, 1) < self._reward_prob[x_prime, y_prime]:  # for any act leading into the rewarded state
+        #     rew = self._reward[x_prime, y_prime]
         # if random.uniform(0, 1) < self._reward_prob[x, y]:  # for any act leading out of the rewarded state
         #     rew = self._reward[x, y]
         #     s_prime = self._maze[x, y]
@@ -278,23 +301,28 @@ class Env:
         # Saving
         self.__save_step__(SEC_winner)
         # return np.array([s_prime]), rew, rew > 0
+
+        # Dealing with the possibility of needing to teleport
+        if rew > 0 and self._teleport:
+            self.place_agent(self._start_pos)
+
         return np.array([x_prime, y_prime]), rew, rew > 0
 
-    def place_reward(self, reward_state: np.ndarray, reward_val: np.ndarray, reward_prob: np.ndarray) -> None:
+    def place_reward(self, reward_state: np.ndarray, reward_mean: np.ndarray, reward_std: np.ndarray) -> None:
         """
         Places the reward.
         :param reward_state: Where this reward should be placed (state-space representation)
-        :param reward_val: Value of this reward
-        :param reward_prob: Probability of said reward
+        :param reward_mean: Mean value of this reward
+        :param reward_std: Standard deviation of said reward
         :return: -
         """
         for rew_idx in range(len(reward_state)):
             # [x, y] = np.argwhere(self._maze == reward_state[rew_idx])[0]
             x = reward_state[rew_idx], y = reward_state[rew_idx]
             # Where is the reward and how big is it?
-            self._reward[x, y] = reward_val[rew_idx]
+            self._rew_mean[x, y] = reward_mean[rew_idx]
             # What is the likelihood of getting a reward
-            self._reward_prob[x, y] = reward_prob[rew_idx]
+            self._rew_std[x, y] = reward_std[rew_idx]
 
         # Call the toggle_save, because in case we are saving, adding a new reward means we need to extend the storage
         self.toggle_save(save_on=self._save_env)
@@ -306,8 +334,8 @@ class Env:
 
         :return: -
         """
-        self._reward = np.zeros(self._maze.shape)
-        self._reward_prob = np.zeros(self._maze.shape)
+        self._rew_mean = np.zeros(self._maze.shape)
+        self._rew_std = np.zeros(self._maze.shape)
         return
 
     def place_agent(self, init_state: np.ndarray) -> np.ndarray:
@@ -329,6 +357,46 @@ class Env:
         # return np.array([init_state])
         return np.array([x, y])
 
+    def place_wall(self, wall_coords: np.ndarray) -> None:
+        """
+        A function to place a piece of wall between two neihboring states.
+        :param wall_coords: coordinates of the walls [[[x1, y1], [x2, y2]], [[x3, y3], [x4, y4]]] where the walls are
+        between states 1-2 and state 3-4
+        :return:
+        """
+        if self._forbidden_walls:
+            raise ValueError('If bumping into walls is forbidden, '
+                             'the agent will never learn to avoid a freshly added wall!')
+        if wall_coords is None:
+            return
+
+        # Decoding the states
+        for w_idx in range(wall_coords.shape[0]):
+            coord0 = wall_coords[w_idx, 0, :]
+            coord1 = wall_coords[w_idx, 1, :]
+
+            # Finding the actions in between
+            a0 = np.where(np.all(self._act == coord1 - coord0, axis=1))[0]
+            a1 = np.where(np.all(self._act == coord0 - coord1, axis=1))[0]
+            if a0 is None or len(a0) == 0 or a1 is None or len(a1) == 0:
+                raise ValueError(f'State {coord0} and {coord1} are not neigboring states, '
+                                 f'thus we cannot implement a wall between them')
+
+            # Storing the wall
+            self._walls[coord0[0], coord0[1], a0] = 1
+            self._walls[coord1[0], coord1[1], a1] = 1
+
+        self.toggle_save(save_on=self._save_env)
+        return
+
+    def reset_wall(self) -> None:
+        """
+        A function to delete all walls placed down between states
+        :return:
+        """
+        self._walls = np.zeros((self._maze.shape[0], self._maze.shape[1], len(self._act)))
+        return
+
     # About saving
     def toggle_save(self, **kwargs) -> None:
         """
@@ -342,17 +410,36 @@ class Env:
         save_on = kwargs.get('save_on', not self._save_env)
         if save_on:
             try:
-                if f'rew{np.sum(self._reward > 0) - 1}_pos_x' not in self._events.columns:  # We added a new reward
-                    for rew_idx in range(np.sum(self._reward > 0)):
+                if f'rew{np.sum(self._rew_mean > 0) - 1}_pos_x' not in self._events.columns:  # We added a new reward
+                    for rew_idx in range(np.sum(self._rew_mean > 0)):
                         if f'rew{rew_idx}_pos_x' not in self._events.columns:
                             self._events[f'rew{rew_idx}_pos_x'] = np.full((self._events.shape[0], 1), np.nan)
                             self._events[f'rew{rew_idx}_pos_y'] = np.full((self._events.shape[0], 1), np.nan)
-                            self._events[f'rew{rew_idx}_val'] = np.full((self._events.shape[0], 1), np.nan)
-                            self._events[f'rew{rew_idx}_proba'] = np.full((self._events.shape[0], 1), np.nan)
+                            self._events[f'rew{rew_idx}_mean'] = np.full((self._events.shape[0], 1), np.nan)
+                            self._events[f'rew{rew_idx}_std'] = np.full((self._events.shape[0], 1), np.nan)
+                wall_states = self._maze[np.sum(self._walls, axis=2) > 0]
+                for s0 in wall_states:
+                    [x0, y0] = np.argwhere(self._maze == s0)[0]
+                    for a0 in self._act[self._walls[x0, y0, :] > 0]:
+                        coord1 = np.array([x0, y0]) + a0
+                        s1 = self._maze[coord1[0], coord1[1]]
+                        if f'wall_{s0}_{s1}' not in self._events.columns and f'wall_{s1}_{s0}' not in self._events.columns:
+                            self._events[f'wall_{s0}_{s1}'] = np.zeros((self._events.shape[0], 1))
+
             except AttributeError:  # There is no such thing as _events yet
-                col_names = [f'rew{variable_num}_{variable_name}' for variable_num in range(np.sum(self._reward > 0))
-                             for variable_name in ['pos_x', 'pos_y', 'val', 'proba']]
-                self._events = pd.DataFrame(columns=['iter', 'agent_pos_x', 'agent_pos_y', 'SEC_winner', *col_names])
+                rew_names = [f'rew{variable_num}_{variable_name}' for variable_num in range(np.sum(self._rew_mean > 0))
+                             for variable_name in ['pos_x', 'pos_y', 'mean', 'std']]
+                wall_names = []
+                wall_states = self._maze[np.sum(self._walls, axis=2) > 0]
+                for s0 in wall_states:
+                    [x0, y0] = np.argwhere(self._maze == s0)[0]
+                    for a0 in self._act[self._walls[x0, y0, :] > 0]:
+                        coord1 = np.array([x0, y0]) + a0
+                        s1 = self._maze[coord1[0], coord1[1]]
+                        if f'wall_{s1}_{s0}' not in wall_names:
+                            wall_names.append(f'wall_{s0}_{s1}')
+                self._events = pd.DataFrame(
+                    columns=['iter', 'agent_pos_x', 'agent_pos_y', 'SEC_winner', *rew_names, *wall_names])
             if not self._save_env:
                 self._save_env = True
                 self.__save_step__(False)
@@ -434,6 +521,8 @@ class DTMaze(Env):
         :param kwargs:  forbidden_walls -- is the agent allowed to choose to bump into the wall
                         restricted_dT   -- creates a restricted double-T maze where we can only walk in one direction
                         slip_prob       -- the probability of slipping after a step
+                        teleport        -- should the agent teleport back to its initial position upon reward delivery
+                        start_pos       -- the initial position of the agent
         """
         # Handling the potential kwargs
         forbidden_walls = kwargs.get('forbidden_walls', False)
@@ -454,9 +543,9 @@ class DTMaze(Env):
         # Transitions
         self._slip_prob = slip_prob
         # Where is the reward
-        self._reward = np.zeros(self._maze.shape)
+        self._rew_mean = np.zeros(self._maze.shape)
         # What is the likelihood of getting a reward
-        self._reward_prob = np.zeros(self._maze.shape)
+        self._rew_std = np.zeros(self._maze.shape)
         # Where do we usually start from
         self._agent_pos = np.zeros(self._maze.shape)
         # Are there any forbidden actions (following the coding of _act)
@@ -478,8 +567,17 @@ class DTMaze(Env):
         else:
             self._restrict = np.zeros((self._maze.shape[0], self._maze.shape[1], len(self._act)))
         # Are the walls restricted
+        self._forbidden_walls = forbidden_walls
         if forbidden_walls:
             self.__restrict_walls__()
+        # Walls to insert
+        self._walls = np.zeros((self._maze.shape[0], self._maze.shape[1], len(self._act)))
+
+        # Further options
+        self._teleport = kwargs.get('teleport', True)
+        self._start_pos = kwargs.get('start_pos', None)
+        if self._start_pos is not None:
+            self.place_agent(self._start_pos)
         return
 
 
@@ -546,6 +644,27 @@ class PlotterEnv(Env):
         return
 
     # Internal methods of the plotter
+    def __find_max_vals__(self, col_name: str, agent_name: str) -> pd.core.frame.DataFrame:
+        """
+        Finds the maximal values for a given quality function for each state
+        :return:
+        """
+        vals = pd.DataFrame()
+        empty_arr = np.empty(self._agent_events[agent_name].shape[0])
+        empty_arr[:] = np.nan
+        for s_idx in range(self.state_num()):
+            [x, y] = np.argwhere(self._maze == s_idx)[0]
+            if f'{col_name}_[{x} {y}]_0' in self._agent_events[agent_name].columns:
+                cols = [f'{col_name}_[{x} {y}]_{a_idx}' for a_idx in range(self.act_num())]
+                val_max = self._agent_events[agent_name][cols].max(axis=1)
+                # For negative values:
+                # val_min = self._agent_events[cols].min(axis=1)
+                # val_max[abs(val_min) > abs(val_max)] = val_min[abs(val_min) > abs(val_max)]
+                vals[f'{col_name}_{s_idx}'] = val_max
+            else:
+                vals[f'{col_name}_{s_idx}'] = pd.DataFrame(empty_arr, columns=[f'{col_name}_{s_idx}'])
+        return vals
+
     def __find_state_coord__(self, row_idx: int, col_name: str) -> Tuple[int, int]:
         """
         Finds the coordinates of a state at a given row in the event table
@@ -566,9 +685,55 @@ class PlotterEnv(Env):
         :return:
         """
         values = values.to_numpy()
-        image = np.zeros(self._maze.shape)
+        image = np.empty(self._maze.shape)
+        image[:] = np.nan
         image[self._maze >= 0] = values
         return image
+
+    def __wall_to_line__(self, it: int) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Takes an iteration and produces 2 arrays, with the x and y coordinates of the walls that need to be plotted over
+         the image
+        :param it: iteration we are in
+        :return:
+        """
+        wall_states = np.array([])
+        for col_name in self._events.columns:
+            if col_name[0:5] == 'wall_':
+                if self._events[col_name].iloc[it] == 1:
+                    col_name = col_name[5:]
+                    res = re.search('_', col_name)
+                    if len(wall_states) == 0:
+                        wall_states = np.array([[int(col_name[0:res.start()]), int(col_name[res.start() + 1:])]])
+                    else:
+                        wall_states = np.append(wall_states,
+                                                np.array(
+                                                    [[int(col_name[0:res.start()]), int(col_name[res.start() + 1:])]]),
+                                                axis=0)
+        wall_x = np.array([])
+        wall_y = np.array([])
+        for w in wall_states:
+            # Decoding the states
+            coord0 = np.argwhere(self._maze == w[0])[0]
+            coord1 = np.argwhere(self._maze == w[1])[0]
+
+            # The algorithm for finding the x and the y coordinates of the walls is the following.
+            # 1) Find the midpoint of the wall
+            avg = np.mean(np.array([coord0, coord1]), axis=0)
+            # 2) The x vector will be determined by the 2nd cooridnate (vertical if it's x.5, horizontal otherwise)
+            x = np.array([[avg[1], avg[1]]]) if avg[1] != coord0[1] else np.array([[avg[1] - 0.5, avg[1] + 0.5]])
+            # 2) The y vector will be determined by the 1st cooridnate (horizontal if it's x.5, vertical otherwise)
+            y = np.array([[avg[0], avg[0]]]) if avg[0] != coord0[0] else np.array([[avg[0] - 0.5, avg[0] + 0.5]])
+
+            # Add it to the output
+            if len(wall_x) == 0:
+                wall_x = x
+                wall_y = y
+            else:
+                wall_x = np.append(wall_x, x, axis=0)
+                wall_y = np.append(wall_y, y, axis=0)
+
+        return wall_x, wall_y
 
     def __status_to_image__(self, it: int) -> np.ndarray:
         """
@@ -578,9 +743,10 @@ class PlotterEnv(Env):
         :param it: the iteration we are in
         :return:
         """
-        # wall = 0, path = 1, reward = 2, SEC_agent = 4, SORB_agent = 6
-        image = np.zeros(self._maze.shape)
-        image[self._maze >= 0] = 1
+        # wall = nan, path = 0, reward = 1, SEC_agent = 4, SORB_agent = 6
+        image = np.empty(self._maze.shape)
+        image[:] = np.nan
+        image[self._maze >= 0] = 0
         reward_num = int((self._events.shape[1] - 3) / 4)
         for rew_idx in range(reward_num):
             if self._events[f'rew{rew_idx}_pos_x'].iloc[it] >= 0:
@@ -600,7 +766,7 @@ class PlotterEnv(Env):
         :param row_idx: the row idx in the agent event memory table the replay of which we want to depict
         :return:
         """
-        max_val = curr_image.max().max()
+        max_val = np.nanmax(curr_image)
         x, y = self.__find_state_coord__(row_idx, 's')
         curr_image[x, y] = max_val + 1
         [x, y] = self.__find_state_coord__(row_idx, 's_prime')
@@ -641,47 +807,11 @@ class PlotterEnv(Env):
         :return:
         """
         # 0) Preparing the dataframes -- we need the max Q value for each state, and (as of now) the mean H value
-        Q_vals, SEQ_vals = pd.DataFrame(), pd.DataFrame()
-        Ur_vals, Ut_vals, C_vals = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-        empty_arr = np.empty(self._agent_events['SORB'].shape[0])
-        empty_arr[:] = np.nan
-        for s_idx in range(self.state_num()):
-            [x, y] = np.argwhere(self._maze == s_idx)[0]
-            if f'Q_[{x} {y}]_0' in self._agent_events['SEC'].columns:
-                cols = [f'Q_[{x} {y}]_{a_idx}' for a_idx in range(self.act_num())]
-                SEQ_vals[f'Q_{s_idx}'] = self._agent_events['SEC'][cols].max(axis=1)
-            else:
-                SEQ_vals[f'Q_{s_idx}'] = pd.DataFrame(empty_arr,
-                                                    columns=[f'Q_{s_idx}'])
-
-            if f'Q_[{x} {y}]_0' in self._agent_events['SORB'].columns:
-                cols = [f'Q_[{x} {y}]_{a_idx}' for a_idx in range(self.act_num())]
-                Q_vals[f'Q_{s_idx}'] = self._agent_events['SORB'][cols].max(axis=1)
-            else:
-                Q_vals[f'Q_{s_idx}'] = pd.DataFrame(empty_arr,
-                                                    columns=[f'Q_{s_idx}'])
-            # As for the H values, some actions (namely the forbidden ones) will never be explored by the agent. Thus
-            # instead of storing all H values from the table, we only store those that the agent had a chance to learn
-            if f'Ur_[{x} {y}]_0' in self._agent_events['SORB'].columns:
-                cols = [f'Ur_[{x} {y}]_{a_idx}' for a_idx in self.possible_moves(np.array([x, y]))]
-                Ur_vals[f'Ur_{s_idx}'] = self._agent_events['SORB'][cols].max(axis=1)
-            else:
-                Ur_vals[f'Ur_{s_idx}'] = pd.DataFrame(empty_arr,
-                                                      columns=[f'Ur_{s_idx}'])
-
-            if f'Ut_[{x} {y}]_0' in self._agent_events['SORB'].columns:
-                cols = [f'Ut_[{x} {y}]_{a_idx}' for a_idx in self.possible_moves(np.array([x, y]))]
-                Ut_vals[f'Ut_{s_idx}'] = self._agent_events['SORB'][cols].max(axis=1)
-            else:
-                Ut_vals[f'Ut_{s_idx}'] = pd.DataFrame(empty_arr,
-                                                      columns=[f'Ut_{s_idx}'])
-
-            if f'C_[{x} {y}]_0' in self._agent_events['SORB'].columns:
-                cols = [f'C_[{x} {y}]_{a_idx}' for a_idx in self.possible_moves(np.array([x, y]))]
-                C_vals[f'C_{s_idx}'] = self._agent_events['SORB'][cols].max(axis=1)
-            else:
-                C_vals[f'C_{s_idx}'] = pd.DataFrame(empty_arr,
-                                                    columns=[f'C_{s_idx}'])
+        SEQ_vals = self.__find_max_vals__('Q', 'SEC')
+        Q_vals = self.__find_max_vals__('Q', 'SORB')
+        Ur_vals = self.__find_max_vals__('Ur', 'SORB')
+        Ut_vals = self.__find_max_vals__('Ut', 'SORB')
+        C_vals = self.__find_max_vals__('C', 'SORB')
 
         max_vals = np.array([1,  # SEQmax
                              np.nanmax(Q_vals.iloc[0].to_numpy()),  # Qmax
@@ -702,6 +832,11 @@ class PlotterEnv(Env):
                              ax_env[1].imshow(curr_SEQ, vmin=0, vmax=max_vals[0]),
                              ax_env[2].imshow(curr_C, vmin=0, vmax=1)])
         axim_env[0].autoscale()  # Since here the extremes already appear
+        # And then the walls
+        curr_walls_x, curr_walls_y = self.__wall_to_line__(0)
+        if len(curr_walls_x) != 0:
+            for w_idx in range(curr_walls_x.shape[0]):
+                ax_env[0].plot(curr_walls_x[w_idx, :], curr_walls_y[w_idx, :], linewidth=5.0, c='w')
 
         fig_rla, ax_rla = plt.subplots(nrows=1, ncols=4, figsize=(20, 4))
         ax_rla[0].set_title("Q values")
@@ -749,22 +884,25 @@ class PlotterEnv(Env):
                     [int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])]:
                 # and self._agent_events['s_prime'].iloc[row_idx] != \
                 # self._maze[int(self._events['agent_pos_x'].iloc[it]), int(self._events['agent_pos_y'].iloc[it])]:
-                raise ValueError(f"mismatch between agent and environment memory in row {row_idx}, iter {it}, step{step}")
+                raise ValueError(
+                    f"mismatch between agent and environment memory in row {row_idx}, iter {it}, step{step}")
 
             # 2.b) Else we have to see if we perform replay or not
             if step > 0:
                 curr_replay = self.__replay_to_image__(curr_replay, row_idx)
             else:
                 curr_replay = np.zeros(self._maze.shape)
+                curr_replay[self._maze == -1] = np.nan
             curr_maze = self.__status_to_image__(it)
             if int(self._agent_events['SORB']['step'].iloc[row_idx]) == 0 and \
-               self._agent_events['SORB']['r'].iloc[row_idx] > 0:  # If this round was rewarded
+                    self._agent_events['SORB']['r'].iloc[row_idx] > 0:  # If this round was rewarded
 
-                if sum(self._agent_events['SEC'].step[0:SEQ_idx+1]) != it:
+                if sum(self._agent_events['SEC'].step[0:SEQ_idx + 1]) != it:
                     raise ValueError(f"mismatch between SEQ agent and environment memory in row {SEQ_idx}")
                 overwrite_SEQ = True  # But we'll only do it after the potential replay
             else:
-                if overwrite_SEQ and int(self._agent_events['SORB']['step'].iloc[row_idx]) == 0:  # If the replay is over
+                if overwrite_SEQ and int(
+                        self._agent_events['SORB']['step'].iloc[row_idx]) == 0:  # If the replay is over
                     curr_SEQ = self.__event_to_img__(SEQ_vals.iloc[SEQ_idx])
                     max_vals[0] = np.nanmax(SEQ_vals.iloc[SEQ_idx].to_numpy())
                     overwrite_SEQ = False
@@ -772,10 +910,10 @@ class PlotterEnv(Env):
             curr_Q = self.__event_to_img__(Q_vals.iloc[row_idx])
             curr_Ur = self.__event_to_img__(Ur_vals.iloc[row_idx])
             curr_Ut = self.__event_to_img__(Ut_vals.iloc[row_idx])
-            max_vals = np.array([max_vals[0],  # SEQmax
-                                 np.nanmax(Q_vals.iloc[row_idx].to_numpy()),  # Qmax
-                                 np.nanmax(Ur_vals.iloc[row_idx].to_numpy()),  # Ur max
-                                 np.nanmax(Ut_vals.iloc[row_idx].to_numpy())])  # Ut max
+            max_vals = np.maximum(max_vals, np.array([max_vals[0],  # SEQmax
+                                                      np.nanmax(Q_vals.iloc[row_idx].to_numpy()),  # Qmax
+                                                      np.nanmax(Ur_vals.iloc[row_idx].to_numpy()),  # Ur max
+                                                      np.nanmax(Ut_vals.iloc[row_idx].to_numpy())]))  # Ut max
             max_vals[max_vals == 0] = 1
             curr_C = self.__event_to_img__(C_vals.iloc[row_idx])
 
@@ -793,6 +931,13 @@ class PlotterEnv(Env):
             axim_env[1].set_data(curr_SEQ)
             axim_env[2].set_data(curr_C)
             axim_env[1].set_clim(vmax=max_vals[0])
+
+            # And then the walls
+            curr_walls_x, curr_walls_y = self.__wall_to_line__(it)
+            while len(ax_env[0].lines) > 0:
+                ax_env[0].lines[0].remove()
+            for w_idx in range(curr_walls_x.shape[0]):
+                ax_env[0].plot(curr_walls_x[w_idx, :], curr_walls_y[w_idx, :], linewidth=5.0, c='w')
 
             axim_rla[0].set_data(curr_Q)
             axim_rla[1].set_data(curr_Ur)
