@@ -75,7 +75,6 @@ class SECagent(object):
 
     def choose_action(self, state):
         #print("choose action state: ", state)
-        self.episode_steps += 1
 
         if self.exploration_mode == 'default':
             action, q = self.default_step(state)
@@ -94,7 +93,7 @@ class SECagent(object):
         #self.update_STM(sa_couplet = [state, action])
         #self.update_sequential_bias()
 
-        return action, q
+        return action, q  # TODO we need the proba of this action, not its Q-value?
 
     def update_epsilon(self):
         if self.epsilon > 0.05: #R
@@ -280,7 +279,7 @@ class SECagent(object):
 
     # Couplet expects a list with [state, action]; Goal is -1 or 1 indicating aversive or appetitive goal has been reached.
     def update_STM(self, couplet=[]):
-
+        self.episode_steps += 1
         # Update STM buffer with the new couplet (FIFO).
         self.STM.append(couplet)
         self.STM = self.STM[1:] # renew the STM buffer by removing the first value of the STM

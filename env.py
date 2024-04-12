@@ -256,7 +256,7 @@ class Env:
 
     # And receiving communication from the agent
 
-    def step(self, s: np.ndarray, a: int, SEC_winner: bool) -> Tuple[np.ndarray, float, bool]:
+    def step(self, s: np.ndarray, a: int, winner: str) -> Tuple[np.ndarray, float, bool]:
         """
         Performs a step from state s (as per designated by the agent), taking action a (as per chosen in advance), and
         returns the observed outcome.
@@ -266,6 +266,7 @@ class Env:
 
         :param s: state label, as per understood by the agent
         :param a: action label, following the indexing of self._act
+        :param winner: SEC or SORB
         :return: new state label as per understood by the agent (int), and corresponding reward (float), and whether
             this epoch is over
         """
@@ -299,6 +300,9 @@ class Env:
         #     s_prime = self._maze[x, y]
 
         # Saving
+        if winner not in ['SEC', 'SORB']:
+            raise ValueError(f'The winner agent has to be SEC or SORB but it is {winner}')
+        SEC_winner = winner == 'SEC'
         self.__save_step__(SEC_winner)
         # return np.array([s_prime]), rew, rew > 0
 

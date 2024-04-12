@@ -30,7 +30,8 @@ class RLagent:
     its memory.
     """
 
-    def __init__(self, act_num: int, curr_state: np.ndarray, model_type: str, gamma: float, nV: float, decision_rule: str, **kwargs):
+    def __init__(self, act_num: int, curr_state: np.ndarray, model_type: str, gamma: float, nV: float,
+                 decision_rule: str, **kwargs):
         """
         Constructor for the basic instance of a Reinforcement Learning Agent.
         Exceptions: ValueError, if the str parameters are invalid
@@ -445,7 +446,7 @@ class RLagent:
         self._maxval = np.nanmax(np.array([self._maxval, np.nanmax(self.__amax_C__(), axis=0)]), axis=0)
         # self._maxval[self._maxval == 0] = 1  # It's only used for normalization
         # Now we want to return the norm of the TD error, combined in a way to make it comparable to the replay buffer
-        return np.sum(abs(self.__C_vector__(s=s, a=a, replay=True) - C_curr))
+        return float(np.sum(abs(self.__C_vector__(s=s, a=a, replay=True) - C_curr)))
 
     # Hidden methods for MB learning
     def __MB_update__(self, s: int, a: int, val_func: np.ndarray) -> np.ndarray:
@@ -474,7 +475,7 @@ class RLagent:
         self._maxval = np.nanmax(np.array([self._maxval, np.nanmax(self.__amax_C__(), axis=0)]), axis=0)
         # self._maxval[self._maxval == 0] = 1  # It's only used for normalization
         # Now we want to return the norm of the TD error, combined in a way to make it comparable to the replay buffer
-        return np.sum(abs(self.__C_vector__(s=s, a=a, replay=True) - C_curr))
+        return float(np.sum(abs(self.__C_vector__(s=s, a=a, replay=True) - C_curr)))
 
     def __policy_iteration__(self, s: int, u: int) -> Tuple[float, np.ndarray]:
         """
@@ -616,7 +617,7 @@ class RLagent:
 
             if len(actions_to_choose) > 0:
                 # 2.b) committing to a choice
-                a = self.choose_action(curr_s, actions_to_choose, virtual=True)
+                a, _ = self.choose_action(curr_s, actions_to_choose, virtual=True)
                 # If we need to combine delta, we choose action based on epist values, otherwise not (done in
                 # choose_action)
                 s_prime = np.random.choice(list(range(self._nS)), p=self._T[curr_s, a, :])
@@ -710,7 +711,7 @@ class RLagent:
         return
 
     # Methods used to instruct the agent
-    def choose_action(self, s: np.ndarray, a_poss: np.ndarray, **kwargs) -> Tuple[int, float]:
+    def choose_action(self, s: Union[np.ndarray, int], a_poss: np.ndarray, **kwargs) -> Tuple[int, float]:
         """
         Chooses actions from the available ones from a predefined state and the set of available actions observed from
         env. The action choice will depend on the decision rule. We might use a softmax function, a greedy choice by Q,
@@ -726,13 +727,17 @@ class RLagent:
         if not virtual:
             s = self.__translate_s__(s)
 
+        # Performing memory replay
+        if not virtual:
+            self.memory_replay(s=s)
+
         # Let's make the decision:
         # 1) if epsilon greedy, and we explore
         if self._decision_rule == "epsilon":
             # Simplest case, we choose randomly
             if np.random.uniform(0, 1, 1) <= self._epsilon:
                 a = np.random.choice(a_poss)
-                return int(a), self._C[s, a, 0]  # np.sum(self.__C_vector__(s=s, a=a))]
+                return int(a), 1-self._epsilon  # np.sum(self.__C_vector__(s=s, a=a))] # TODO return the p-value?
 
         # 2) For the other methods combine all the potential constituents
         C_poss = np.array([np.sum(self.__C_vector__(s=s, a=idx_a, replay=virtual)) for idx_a in a_poss])
@@ -744,12 +749,12 @@ class RLagent:
         if self._decision_rule == "softmax":
             p_poss = np.exp(self._beta * C_poss) / np.sum(np.exp(self._beta * C_poss))
             a = np.random.choice(a_poss, p=p_poss)
-            return int(a), self._C[s, a, 0] #  np.sum(self.__C_vector__(s=s, a=a))]
+            return int(a), p_poss[a_poss == a][0]  # np.sum(self.__C_vector__(s=s, a=a))]
 
         # 4) If we choose the maximum (either due to greedy or epsilon greedy policies)
         a_poss = a_poss[C_poss == max(C_poss)]
         a = np.random.choice(a_poss)
-        return int(a), self._C[s, a, 0] #  np.sum(self.__C_vector__(s=s, a=a))]
+        return int(a), 1  # np.sum(self.__C_vector__(s=s, a=a))]
 
     def model_learning(self, s: np.ndarray, a: int, s_prime: np.ndarray, r: float) -> Tuple[float, float]:
         """
@@ -816,7 +821,7 @@ class RLagent:
 
         return hr, ht
 
-    def inference(self, s: np.ndarray, a: int, s_prime: np.ndarray, rew: np.ndarray, **kwargs) -> bool:
+    def inference(self, s: Union[np.ndarray, int], a: int, s_prime: Union[np.ndarray, int], rew: np.ndarray, **kwargs) -> float:
         """
         Overwrites the parent class's method. Uses TDE to actualy update the Q values
         :param s: current state label
@@ -828,7 +833,7 @@ class RLagent:
                 forward and backward replay or trsam we don't want to update the memory buffer
             virtual: is this a virtual step [True] or a real one [False, default] -- will decide if we'll learn epist
                 values from it, and *in case we update the buffer*, do we add predecessors to it
-        :return: whether we replayed or not
+        :return:
         """
         # Let's see what situation we're in (real step or virtual, do we update the buffer or not)
         update_buffer = kwargs.get('update_buffer', True)
@@ -867,15 +872,7 @@ class RLagent:
                 self.__find_predecessors__(s, abs(delta_C))
         # Saving the step in a table
         self.__save_step__(virtual, s=s, a=a, s_prime=s_prime, rew=rew, deltaC=delta_C)
-
-        # Performing memory replay
-        replayed = False
-        if not virtual and self._replay_type in ['forward', 'backward', 'priority'] \
-                and abs(delta_C) > self._replay_thresh:
-            self.memory_replay(s=s)
-            replayed = True
-
-        return replayed
+        return delta_C
 
     def memory_replay(self, **kwargs) -> None:
         """
@@ -911,9 +908,12 @@ class RLagent:
         it = 0  # how many iterations of memory replay have e performed so far
         buffer_idx = 0  # which memory are we replaying (for priority and bidir it's always 0)
         stop_loc = np.array([])  # for bidirectional, we might want to collect the states in which we need to stop
+        empty_idx = np.where(np.all(self._memory_buff == 0, axis=1))[0]  # IDX of all empty rows
 
         # 1.1) Iterate while we can
         while self._memory_buff.size > 0 and (self._max_replay is None or it < max_replay):
+            if empty_idx.size != 0 and empty_idx[0] == 0:
+                break
             event = np.copy(self._memory_buff[buffer_idx])  # buffer_idx == 0 for priority and bidir
             # 1.2) We break out of the loop if nothing significant is produced. The criterion differs between the
             # different replay methods.
@@ -955,7 +955,7 @@ class RLagent:
                         if self._replay_type in ['forward', 'backward']:
                             it += 1
                         continue
-                    a = self.choose_action(s, a_poss, virtual=True)
+                    a, _ = self.choose_action(s, a_poss, virtual=True)
                 if self._event_content in ['sas', 'sasr']:
                     s_prime = int(event[2])
                 else:
@@ -981,6 +981,7 @@ class RLagent:
                 if buffer_idx >= self._memory_buff.shape[0]:
                     # No need to take care of arriving at an empty row, that's handled in 1.2.b)
                     buffer_idx = 0
+            empty_idx = np.where(np.all(self._memory_buff == 0, axis=1))[0]  # IDX of all empty rows
 
         # 2) If bidir, let's run some simulations using the remaining steps
         if self._replay_type == 'bidir':
