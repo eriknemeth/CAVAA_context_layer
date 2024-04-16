@@ -137,10 +137,14 @@ class metaAgent():
             return action_SEC, 'SEC'
         else:
             start_SORB = time.time()
-            action_SORB, action_prob_SORB = self._SORB.choose_action(state, poss_moves)
+            action_SORB, action_prob_SORB, s_replayed = self._SORB.choose_action(state, poss_moves)
             end_SORB = time.time()
-            self._LPF_action_prob_SORB[state_idx], self._LPF_comp_time_SORB[state_idx] = \
-                self.__update_action_probs_and_comp_time__('SORB', state_idx, action_prob_SORB, end_SORB - start_SORB)
+            if s_replayed is None:
+                s_replayed = state_idx
+            else:
+                s_replayed = self.__translate_s__(s_replayed)
+            self._LPF_action_prob_SORB[s_replayed], self._LPF_comp_time_SORB[s_replayed] = \
+                self.__update_action_probs_and_comp_time__('SORB', s_replayed, action_prob_SORB, end_SORB - start_SORB)
             return action_SORB, 'SORB'
 
     def learning(self, state: np.ndarray, action: int, new_state: np.ndarray, reward: float):

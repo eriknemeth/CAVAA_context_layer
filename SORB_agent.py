@@ -30,7 +30,7 @@ class RLagent:
     its memory.
     """
 
-    def __init__(self, act_num: int, curr_state: np.ndarray, model_type: str, gamma: float, nV: float,
+    def __init__(self, act_num: int, curr_state: np.ndarray, model_type: str, gamma: float, beta: float, nV: float,
                  decision_rule: str, **kwargs):
         """
         Constructor for the basic instance of a Reinforcement Learning Agent.
@@ -39,11 +39,11 @@ class RLagent:
         :param curr_state: ID of the current state
         :param model_type: temporal difference ['TD'], value iteration ['VI'] or policy iteration ['PI']
         :param gamma: discounting factor [float]
+        :param beta: for softmax decisions (non-optional) [float]
         :param nV: number of visits that will be remembered by the model
         :param kwargs: parameters regarding the decision rule, the replay and the epistemic rewards
             Regarding the model:
                 alpha: learning rat eif model_type is 'TD' [float]
-                beta: for softmax decisions (non-optional) [float]
                 epsilon: for epsilon-greedy decisions (non-optional) [float]
                 teleport: will we teleport after receiving a reward? If True, we have to give special treatment to the
                     rewarded state
@@ -86,10 +86,9 @@ class RLagent:
         self._nV = nV
         self._model_type = model_type
         self._decision_rule = decision_rule
-        if self._decision_rule == "softmax":
-            self._beta = kwargs.get("beta", None)
-            if self._beta is None:
-                raise ValueError("Decision rule 'softmax' requires temperature parameter 'beta'")
+        self._beta = beta
+        if self._beta is None:
+            raise ValueError("Beta is always needed for the softmax probability computation")
         elif self._decision_rule == "epsilon":
             self._epsilon = kwargs.get("epsilon", None)
             if self._epsilon is None:
@@ -711,7 +710,8 @@ class RLagent:
         return
 
     # Methods used to instruct the agent
-    def choose_action(self, s: Union[np.ndarray, int], a_poss: np.ndarray, **kwargs) -> Tuple[int, float]:
+    def choose_action(self, s: Union[np.ndarray, int], a_poss: np.ndarray, **kwargs) -> \
+            Tuple[int, float, Union[np.ndarray, None]]:
         """
         Chooses actions from the available ones from a predefined state and the set of available actions observed from
         env. The action choice will depend on the decision rule. We might use a softmax function, a greedy choice by Q,
@@ -720,27 +720,27 @@ class RLagent:
         :param a_poss: array of possible actions, given by the env
         :param kwargs:
             virtual: is this a virtual step (True) or a real one (False, default)
-        :return: chosen action and the associated C-value
+        :return: chosen action and the associated C-value; plus the state promoting the replay
         """
         # Let's see what epistemic values we will have to combine (is this a real decision, or a virtual replay?)
         virtual = kwargs.get('virtual', False)
+
+        # If s comes from the outside world, it strictly means that we wanna replay
         if not virtual:
+            s_replayed = self.memory_replay(s=s)
             s = self.__translate_s__(s)
 
-        # Performing memory replay
-        if not virtual:
-            self.memory_replay(s=s)
-
         # Let's make the decision:
+        C_poss = np.array([np.sum(self.__C_vector__(s=s, a=idx_a, replay=virtual)) for idx_a in a_poss])
+        p_poss = np.exp(self._beta * C_poss) / np.sum(np.exp(self._beta * C_poss))
         # 1) if epsilon greedy, and we explore
         if self._decision_rule == "epsilon":
             # Simplest case, we choose randomly
             if np.random.uniform(0, 1, 1) <= self._epsilon:
                 a = np.random.choice(a_poss)
-                return int(a), 1-self._epsilon  # np.sum(self.__C_vector__(s=s, a=a))] # TODO return the p-value?
+                return int(a), p_poss[a_poss == a][0], s_replayed  # np.sum(self.__C_vector__(s=s, a=a))]
 
         # 2) For the other methods combine all the potential constituents
-        C_poss = np.array([np.sum(self.__C_vector__(s=s, a=idx_a, replay=virtual)) for idx_a in a_poss])
         # C_poss is between 0 and 1
         if self.__isterminal__(s):  # In case this is the first time we're leaving this terminal state
             C_poss = np.zeros(C_poss.shape)
@@ -749,12 +749,12 @@ class RLagent:
         if self._decision_rule == "softmax":
             p_poss = np.exp(self._beta * C_poss) / np.sum(np.exp(self._beta * C_poss))
             a = np.random.choice(a_poss, p=p_poss)
-            return int(a), p_poss[a_poss == a][0]  # np.sum(self.__C_vector__(s=s, a=a))]
+            return int(a), p_poss[a_poss == a][0], s_replayed  # np.sum(self.__C_vector__(s=s, a=a))]
 
         # 4) If we choose the maximum (either due to greedy or epsilon greedy policies)
         a_poss = a_poss[C_poss == max(C_poss)]
         a = np.random.choice(a_poss)
-        return int(a), 1  # np.sum(self.__C_vector__(s=s, a=a))]
+        return int(a), p_poss[a_poss == a][0], s_replayed  # np.sum(self.__C_vector__(s=s, a=a))]
 
     def model_learning(self, s: np.ndarray, a: int, s_prime: np.ndarray, r: float) -> Tuple[float, float]:
         """
@@ -874,13 +874,13 @@ class RLagent:
         self.__save_step__(virtual, s=s, a=a, s_prime=s_prime, rew=rew, deltaC=delta_C)
         return delta_C
 
-    def memory_replay(self, **kwargs) -> None:
+    def memory_replay(self, **kwargs) -> Union[np.ndarray, None]:
         """
         Performs the memory replay. It either goes through the memory buffer, and performs a learning step on the stored
         events, in an order predefined by self._replay_type; or calls trajectory_sampling to generate virtual experience
         :param kwargs:
             s: the label of the starting state, in case the replay is trajectory sampling [int]
-        :return:
+        :return: the handle of the state that got first replayed
         """
 
         # 0) This function uses stored memories to replay. For simulating experience, we need to call trsam
@@ -892,7 +892,7 @@ class RLagent:
                 raise ValueError('Trajectory sampling needs a starting state specified.')
             s = self.__translate_s__(s)  # As s comes from the outside
             self.__trajectory_sampling__(s)
-            return
+            return None
         elif self._replay_type in ['priority', 'bidir']:
             # TODO I think for bidir we should launch it not when we see a significant change, but precisely when we
             #  don't. When we do see a significant change, the prioritized sweeping will take care of it, leaving
@@ -911,6 +911,7 @@ class RLagent:
         empty_idx = np.where(np.all(self._memory_buff == 0, axis=1))[0]  # IDX of all empty rows
 
         # 1.1) Iterate while we can
+        starting_state = None
         while self._memory_buff.size > 0 and (self._max_replay is None or it < max_replay):
             if empty_idx.size != 0 and empty_idx[0] == 0:
                 break
@@ -921,6 +922,8 @@ class RLagent:
                 # 1.2.a) If priority/bidir, we'll check significance: if we're still significant (delta > threshold) we
                 # take the first element, and perform the update on it. If it's an empty event, that means the buffer
                 # is empty, and the replay is over
+                if starting_state is None:
+                    starting_state = self._states[int(event[0])]  # TODO event[0] (s) or event[2] (s')
                 if np.all(event == 0):
                     break
                 self.__pop_memory__()  # Remove the event that we'll replay
@@ -993,7 +996,7 @@ class RLagent:
             if steps is not None:
                 steps -= it
             self.__trajectory_sampling__(s, stop_loc=np.unique(stop_loc), steps=steps)
-        return
+        return starting_state
 
     # def update_agent(self, mdp: Env) -> None:
     #     """

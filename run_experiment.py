@@ -115,8 +115,7 @@ def spatial_navigation() -> None:
     SORB_params['decision_rule'] = 'softmax'  # ------------- Could be 'max', 'softmax', 'epsilon'
     if SORB_params['decision_rule'] == 'epsilon':
         SORB_params['epsilon'] = 0.1  # --------------------- Epsilon of the epsilon-greedy
-    elif SORB_params['decision_rule'] == 'softmax':
-        SORB_params['beta'] = 10  # ------------------------- Beta for softmax
+    SORB_params['beta'] = 100  # ----------------------------- Beta for softmax
     SORB_params['replay_type'] = 'priority'  # -------------- 'priority', 'trsam', 'bidir', 'backwards', 'forward'
     SORB_params['replay_every_step'] = True  # -------------- Replay after each step
     if SORB_params['replay_type'] in ['trsam', 'bidir']:
