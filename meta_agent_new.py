@@ -24,19 +24,19 @@ class metaAgent():
         self._beta = SORB_params['beta']
 
         # Low-pass filetered action probabilities and computation time values for both models
-        self._LPF_action_prob_SEC = {state_idx: 0.}
-        self._LPF_action_prob_SORB = {state_idx: 0.}
+        self._LPF_action_prob_SEC = {state_idx: np.ones(len(SORB_params['actions']))*1/len(SORB_params['actions'])}
+        self._LPF_action_prob_SORB = {state_idx: np.ones(len(SORB_params['actions']))*1/len(SORB_params['actions'])}
         self._LPF_comp_time_SEC = {state_idx: 0.}
         self._LPF_comp_time_SORB = {state_idx: 0.}
 
         # Initialize histories
-        self._action_prob_history_SEC = {state_idx: []}
-        self._action_prob_history_SORB = {state_idx: []}
-        self._computation_time_history_SEC = {state_idx: []}
-        self._computation_time_history_SORB = {state_idx: []}
+        # self._action_prob_history_SEC = {state_idx: []}
+        # self._action_prob_history_SORB = {state_idx: []}
+        # self._computation_time_history_SEC = {state_idx: []}
+        # self._computation_time_history_SORB = {state_idx: []}
 
-        self.kappa = 7  # Parameter of equation from Dromnelle et al. 2023, set at 7 based on paper
-        self.tau = 0.67  # Time constant for the low-pass filter
+        self._kappa = 7  # Parameter of equation from Dromnelle et al. 2023, set at 7 based on paper
+        self._tau = 0.67  # Time constant for the low-pass filter
 
         return
 
@@ -62,37 +62,44 @@ class metaAgent():
         # Then the rest
         s_prime_idx = self.__translate_s__(s_prime)
         # Low-pass filetered action probabilities and computation time values for both models
-        self._LPF_action_prob_SEC[s_prime_idx] = 0.
-        self._LPF_action_prob_SORB[s_prime_idx] = 0.
+        self._LPF_action_prob_SEC[s_prime_idx] = np.ones(len(
+            self._LPF_action_prob_SEC[0]))*1 / len(self._LPF_action_prob_SEC[0])
+        self._LPF_action_prob_SORB[s_prime_idx] = np.ones(len(
+            self._LPF_action_prob_SORB[0]))*1 / len(self._LPF_action_prob_SORB[0])
         self._LPF_comp_time_SEC[s_prime_idx] = 0.
         self._LPF_comp_time_SORB[s_prime_idx] = 0.
 
-        # Initialize histories
-        self._action_prob_history_SEC[s_prime_idx] = []
-        self._action_prob_history_SORB[s_prime_idx] = []
-        self._computation_time_history_SEC[s_prime_idx] = []
-        self._computation_time_history_SORB[s_prime_idx] = []
-
-    def __update_and_filter__(self, history: list, new_value: float) -> float:
+    def __update_and_filter__(self, LPF_value: float, new_value: float) -> float:
         """Update history with new value and return low-pass filtered value."""
-        history.append(new_value)
-        filtered_value = np.mean([v * np.exp(-i / self.tau) for i, v in enumerate(reversed(history))])
-        return filtered_value / np.sum(np.exp(-np.arange(len(history)) / self.tau))
+        return self._tau * new_value + (1 - self._tau) * LPF_value
 
-    def __update_action_probs_and_comp_time__(self, expert, state_idx, action_probs, comp_time):
+    def __update_comp_time__(self, expert: str, state_idx: int, comp_time: float) -> float:
         """Update action probabilities and computation time history for an expert."""
         if expert == 'SEC':
-            filtered_prob_SEC = self.__update_and_filter__(self._action_prob_history_SEC[state_idx], action_probs)
-            filtered_time_SEC = self.__update_and_filter__(self._computation_time_history_SEC[state_idx], comp_time)
-            return filtered_prob_SEC, filtered_time_SEC
+            filtered_time_SEC = self.__update_and_filter__(self._LPF_comp_time_SEC[state_idx], comp_time)
+            return filtered_time_SEC
         elif expert == 'SORB':
-            filtered_prob_SORB = self.__update_and_filter__(self._action_prob_history_SORB[state_idx], action_probs)
-            filtered_time_SORB = self.__update_and_filter__(self._computation_time_history_SORB[state_idx], comp_time)
-            return filtered_prob_SORB, filtered_time_SORB
+            filtered_time_SORB = self.__update_and_filter__(self._LPF_comp_time_SORB[state_idx], comp_time)
+            return filtered_time_SORB
         else:
             raise ValueError("Invalid expert name. Use 'SEC' or 'SORB'.")
 
-    def __compute_entropy__(self, action_probs):
+    def __update_action_probs__(self, expert: str, state_idx: int, action_probs: np.ndarray) -> np.ndarray:
+        """Update action probabilities and computation time history for an expert."""
+        if expert == 'SEC':
+            filtered_prob_SEC = [self.__update_and_filter__(self._LPF_action_prob_SEC[state_idx][ap_idx],
+                                                            action_probs[ap_idx]) for ap_idx in
+                                 range(len(action_probs))]
+            return np.array(filtered_prob_SEC)
+        elif expert == 'SORB':
+            filtered_prob_SORB = [self.__update_and_filter__(self._LPF_action_prob_SORB[state_idx][ap_idx],
+                                                             action_probs[ap_idx]) for ap_idx in
+                                  range(len(action_probs))]
+            return np.array(filtered_prob_SORB)
+        else:
+            raise ValueError("Invalid expert name. Use 'SEC' or 'SORB'.")
+
+    def __compute_entropy__(self, action_probs: np.ndarray) -> float:
         """
         Equation 5 from Dromnelle et al. 2023.
         Compute the entropy of the action probability distribution.
@@ -103,8 +110,8 @@ class metaAgent():
         """
         Equation 6 from Dromnelle et al. 2023.
         Compute the expert-value for the MF and MB strategies."""
-        Q_MF = -(H_MF + np.exp(-self.kappa * H_MF) * CT_MF)
-        Q_MB = -(H_MB + np.exp(-self.kappa * H_MF) * CT_MB)
+        Q_MF = -(H_MF + np.exp(-self._kappa * H_MF) * CT_MF)
+        Q_MB = -(H_MB + np.exp(-self._kappa * H_MF) * CT_MB)
         return Q_MF, Q_MB
 
     def action_selection(self, state: np.ndarray, poss_moves: np.ndarray) -> Tuple[int, str]:
@@ -126,14 +133,15 @@ class metaAgent():
                                                       self._LPF_comp_time_SORB[state_idx])
 
         # Selecting action based on the higher expert-value
-        p_agent = np.exp(self._beta * np.array([Q_SEC, Q_SORB])) / np.sum(np.exp(self._beta * np.array([Q_SEC, Q_SORB])))
+        p_agent = np.exp(self._beta * np.array([Q_SEC, Q_SORB])) / np.sum(
+            np.exp(self._beta * np.array([Q_SEC, Q_SORB])))
         agent_idx = np.random.choice(np.array([0, 1]), p=p_agent)
         if agent_idx == 0:
             start_SEC = time.time()
             action_SEC, action_prob_SEC = self._SEC.choose_action(state)
             end_SEC = time.time()
-            self._LPF_action_prob_SEC[state_idx], self._LPF_comp_time_SEC[state_idx] = \
-                self.__update_action_probs_and_comp_time__('SEC', state_idx, action_prob_SEC, end_SEC - start_SEC)
+            self._LPF_action_prob_SEC[state_idx] = self.__update_action_probs__('SEC', state_idx, action_prob_SEC)
+            self._LPF_comp_time_SEC[state_idx] = self.__update_comp_time__('SEC', state_idx, end_SEC - start_SEC)
             return action_SEC, 'SEC'
         else:
             start_SORB = time.time()
@@ -142,9 +150,10 @@ class metaAgent():
             if s_replayed is None:
                 s_replayed = state_idx
             else:
-                s_replayed = self.__translate_s__(s_replayed)
-            self._LPF_action_prob_SORB[s_replayed], self._LPF_comp_time_SORB[s_replayed] = \
-                self.__update_action_probs_and_comp_time__('SORB', s_replayed, action_prob_SORB, end_SORB - start_SORB)
+                s_replayed = self.__translate_s__(
+                    s_replayed)  # TODO: problem -- entropy will also be attributed to the state initiating the replay!
+            self._LPF_action_prob_SORB[s_replayed] = self.__update_action_probs__('SORB', state_idx, action_prob_SORB)
+            self._LPF_comp_time_SORB[s_replayed] = self.__update_comp_time__('SORB', s_replayed, end_SORB - start_SORB)
             return action_SORB, 'SORB'
 
     def learning(self, state: np.ndarray, action: int, new_state: np.ndarray, reward: float):

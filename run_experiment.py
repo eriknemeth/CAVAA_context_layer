@@ -51,9 +51,9 @@ def spatial_navigation() -> None:
     env_params['new_rew_val'] = None  # ------------------- What is (are) the value(s) of the reward(s)
     env_params['new_rew_prob'] = None  # ------------------ What is (area) the probability/ies of the reward(s)
     env_params['wall_loc'] = None  # ---------------------- The wall is between what states (before the change)
-    env_params['wall_change'] = steps * 0.2  # ------------ When do we add a wall (if we do)
-    env_params['new_wall_loc'] = np.array([[[0, 6], [0, 7]],
-                                           [[5, 6], [5, 7]]])  # The wall is between what states (after the change)
+    env_params['wall_change'] = None  # steps * 0.2  # ------------ When do we add a wall (if we do)
+    env_params['new_wall_loc'] = None  # np.array([[[0, 6], [0, 7]],
+                                           # [[5, 6], [5, 7]]])  # The wall is between what states (after the change)
     env_params['start_pos'] = np.array([4, 3])  # --------- What state do we start from
     env_params['forbidden_walls'] = False  # -------------- Is it forbidden to bump into walls?
     env_params['restricted_dT'] = False  # ---------------- Is the movement restricted to unidirectional?

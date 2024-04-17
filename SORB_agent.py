@@ -711,7 +711,7 @@ class RLagent:
 
     # Methods used to instruct the agent
     def choose_action(self, s: Union[np.ndarray, int], a_poss: np.ndarray, **kwargs) -> \
-            Tuple[int, float, Union[np.ndarray, None]]:
+            Tuple[int, np.ndarray, Union[np.ndarray, None]]:
         """
         Chooses actions from the available ones from a predefined state and the set of available actions observed from
         env. The action choice will depend on the decision rule. We might use a softmax function, a greedy choice by Q,
@@ -726,21 +726,23 @@ class RLagent:
         virtual = kwargs.get('virtual', False)
 
         # If s comes from the outside world, it strictly means that we wanna replay
+        s_replayed = None
         if not virtual:
             s_replayed = self.memory_replay(s=s)
             s = self.__translate_s__(s)
 
         # Let's make the decision:
-        C_poss = np.array([np.sum(self.__C_vector__(s=s, a=idx_a, replay=virtual)) for idx_a in a_poss])
-        p_poss = np.exp(self._beta * C_poss) / np.sum(np.exp(self._beta * C_poss))
+        Q_poss = self._C[s, :, 0]
+        q_poss = np.exp(self._beta * Q_poss) / np.sum(np.exp(self._beta * Q_poss))
         # 1) if epsilon greedy, and we explore
         if self._decision_rule == "epsilon":
             # Simplest case, we choose randomly
             if np.random.uniform(0, 1, 1) <= self._epsilon:
                 a = np.random.choice(a_poss)
-                return int(a), p_poss[a_poss == a][0], s_replayed  # np.sum(self.__C_vector__(s=s, a=a))]
+                return int(a), q_poss, s_replayed  # np.sum(self.__C_vector__(s=s, a=a))]
 
         # 2) For the other methods combine all the potential constituents
+        C_poss = np.array([np.sum(self.__C_vector__(s=s, a=idx_a, replay=virtual)) for idx_a in a_poss])
         # C_poss is between 0 and 1
         if self.__isterminal__(s):  # In case this is the first time we're leaving this terminal state
             C_poss = np.zeros(C_poss.shape)
@@ -749,12 +751,12 @@ class RLagent:
         if self._decision_rule == "softmax":
             p_poss = np.exp(self._beta * C_poss) / np.sum(np.exp(self._beta * C_poss))
             a = np.random.choice(a_poss, p=p_poss)
-            return int(a), p_poss[a_poss == a][0], s_replayed  # np.sum(self.__C_vector__(s=s, a=a))]
+            return int(a), q_poss, s_replayed  # np.sum(self.__C_vector__(s=s, a=a))]
 
         # 4) If we choose the maximum (either due to greedy or epsilon greedy policies)
         a_poss = a_poss[C_poss == max(C_poss)]
         a = np.random.choice(a_poss)
-        return int(a), p_poss[a_poss == a][0], s_replayed  # np.sum(self.__C_vector__(s=s, a=a))]
+        return int(a), q_poss, s_replayed  # np.sum(self.__C_vector__(s=s, a=a))]
 
     def model_learning(self, s: np.ndarray, a: int, s_prime: np.ndarray, r: float) -> Tuple[float, float]:
         """
