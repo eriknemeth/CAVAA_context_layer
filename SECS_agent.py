@@ -78,16 +78,16 @@ class SECagent(object):
         # print("choose action state: ", state)
 
         if self.exploration_mode == 'default':
-            action, q = self.default_step(state)
+            action, action_probs = self.default_step(state)
         if self.exploration_mode == 'fixed':
-            action, q = self.fixed_step(state)
+            action, action_probs = self.fixed_step(state)
         if self.exploration_mode == 'greedy':
-            action, q = self.action_selection(state)
+            action, action_probs = self.action_selection(state)
         if self.exploration_mode == 'epsilon':
-            action, q = self.epsilon_step(state)
+            action, action_probs = self.epsilon_step(state)
             # print('state is: ', state)
         if self.exploration_mode == 'epsilon_decay':
-            action, q = self.epsilon_step(state)
+            action, action_probs = self.epsilon_step(state)
             self.update_epsilon()
 
         # MEMORY UPDATE PHASE 1
@@ -108,56 +108,57 @@ class SECagent(object):
         # Standard: Explore until achieve X number of memories
         if len(self.LTM[2]) >= self.memory_threshold:
             # print("state default step: ", state)
-            action, q = self.action_selection(state)
+            action, action_probs = self.action_selection(state)
         else:
             action = np.random.choice(a=self.action_space)
-            q = 0
-        return action, q
+            equal_probability = 1 / self.action_space
+            action_probs = [equal_probability] * self.action_space
+        return action, action_probs
 
     def fixed_step(self, state):
         self.total_steps += 1
         # For Atari games: Chose CL action after a minimum number of exploration steps have been taken
-        action, q = self.action_selection(state)
+        action, action_probs = self.action_selection(state)
         if self.total_steps < self.exploration_steps:
             action = np.random.choice(a=self.action_space)
-        return action, q
+        return action, action_probs
 
     def epsilon_step(self, state):
         # For Atari games: Follow an epsilon-greedy policy
-        action, q = self.action_selection(state)
+        action, action_probs = self.action_selection(state)
         if (np.random.random() < self.epsilon):
             action = np.random.choice(a=self.action_space)
-        return action, q
+        return action, action_probs
 
     def action_selection(self, state):
         # print("state action selection: ", state)
         # get updated policy for a given state
-        q = self.estimate_return(state)
-        # print('Q: ', q)
+        action_probs = self.estimate_return(state)
+        # print('action_probs: ', action_probs)
 
         if self.selection_mode == 'default':
             # SEC DEFAULT: SAMPLE FROM WEIGHTED PROBABILITY
-            self.action = np.random.choice(np.arange(q.shape[0]), p=q)
+            self.action = np.random.choice(np.arange(action_probs.shape[0]), p=action_probs)
             # ac_indx = np.random.choice(np.arange(int(self.action_space[0]*self.action_space[1])), p=q)
             # self.action = [int(ac_indx/self.action_space[0]), int(ac_indx%self.action_space[1])]
 
         if self.selection_mode == 'argmax':
             # RL STANDARD: ARGMAX
-            self.action = np.argmax(q)
+            self.action = np.argmax(action_probs)
 
-        q_action = q[self.action]
+        #selected_action_prob = action_probs[self.action]
 
         if isinstance(self.action_space, list):
             print("NOTE: action space is a list")
             self.action = [int(self.action / self.action_space[1]), self.action % self.action_space[1]]
 
-        return self.action, q_action
+        return self.action, action_probs
 
     def estimate_return(self, state):
         # print("estimate return state: ", state)
         # print(self.LTM[0].shape())
         # get the state-action value based on the memories stored in the LTM
-        q = np.ones(self.action_space) / self.action_space
+        action_probs = np.ones(self.action_space) / self.action_space
         state_array = np.array(state)
 
         if len(self.LTM[0]) > 0:
@@ -185,15 +186,15 @@ class SECagent(object):
                 # choose collector info about the actions selected (that take euclidean distance of current state and collector's selected states)
                 collectors = collectors[self.selected_actions_indx]
 
-                q = self.get_policy(actions, collectors, rewards, distances)
+                action_probs = self.get_policy(actions, collectors, rewards, distances)
 
                 # compute entropy over the policy
-                self.compute_entropy(q)
+                self.compute_entropy(action_probs)
 
             self.selected_actions_indx = self.selected_actions_indx.tolist()
             # print ("selected_actions_indx ", self.selected_actions_indx)
 
-        return q
+        return action_probs
 
     def get_policy(self, actions, collectors, rewards, distances):
         # map each selected action-vector into a matrix of N dimensions where N are the dimensions of the action space
@@ -225,16 +226,16 @@ class SECagent(object):
 
         q = np.sum(m, axis=0)
         # q = q + np.abs(q.min())+1 # NEW
-        q = q / q.sum()  # proportion of being selected based on the action's relative reward based on the stored experiences
+        action_probs = q / q.sum()  # proportion of being selected based on the action's relative reward based on the stored experiences
 
         ### TO TEST CHANGE RELATIVE REWARD FOR SOFTMAX FOR ENVS WITH NEGATIVE REWARDS
-        # q = np.softmax(q)
-        # q = np.exp(q - np.max(q)) / np.exp(q - np.max(m)).sum()  -- sofmax function corrected for large numbers
-        # q = np.exp(q) / np.exp(q).sum()  -- sofmax function unstable for large numbers
+        # action_probs = np.softmax(q)
+        # action_probs = np.exp(q - np.max(q)) / np.exp(q - np.max(m)).sum()  -- sofmax function corrected for large numbers
+        # action_probs = np.exp(q) / np.exp(q).sum()  -- sofmax function unstable for large numbers
 
-        q = q.flatten()
+        action_probs = action_probs.flatten()
 
-        return q
+        return action_probs
 
     def get_policy_from_list(self, actions, collectors, rewards, distances):
         # map each selected action-vector into a matrix of N dimensions where N are the dimensions of the action space
