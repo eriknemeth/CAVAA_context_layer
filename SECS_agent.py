@@ -44,15 +44,17 @@ class SECagent(object):
         # print("action: ", self.action)
 
         # self.STM = [[np.zeros(self.emb_length), np.zeros(1)] for _ in range(self.stm_length)] # pl = prototype length (i.e. dimension of the state vector)
-        self.STM = [[[0] * self.emb_length, 0] for i in range(self.stm_length)]
+        self.STM = [[[-1] * self.emb_length, 0] for i in range(self.stm_length)]
         self.LTM = [[], [], []]
         self.memory_full = False
         self.memory_threshold = memory_threshold
         self.forget_ratio = 0.01  # 1% of memories will be erased when using Forgetting PROP
 
+        self.SEC_active = False
         self.tr = []
         self.last_actions_indx = []
         self.selected_actions_indx = []
+        #self.unique_retrieved_states = []
 
         self.entropy = 0.
         self.selection_mode = selection_mode
@@ -80,16 +82,17 @@ class SECagent(object):
         if not os.path.exists(self.activated_memories_path):
             with open(self.activated_memories_path, 'w', newline='') as file:
                 writer = csv.writer(file)
-                writer.writerow(['Activated Memories'])
+                writer.writerow(['iter', 'activated_memories'])
 
         if not os.path.exists(self.retrieved_states_path):
             with open(self.retrieved_states_path, 'w', newline='') as file:
                 writer = csv.writer(file)
-                writer.writerow(['Retrieved States'])
+                writer.writerow(['iter', 'retrieved_states'])
 
         if load_ltm: self.load_LTM()
 
     def choose_action(self, state):
+        self.total_steps += 1
         # print("choose action state: ", state)
 
         if self.exploration_mode == 'default':
@@ -108,10 +111,9 @@ class SECagent(object):
         # MEMORY UPDATE PHASE 1
         # self.update_STM(sa_couplet = [state, action])
         # self.update_sequential_bias()
+        self.save_activated_memories()
+        self.save_retrieved_states()
 
-        #action_idx = [idx == action for idx in range(4)]
-        #proba = np.ones(4) * (1 - q) / 3
-        #proba[action_idx] = q
         return action, action_probs
 
     def update_epsilon(self):
@@ -123,6 +125,7 @@ class SECagent(object):
         # Standard: Explore until achieve X number of memories
         if len(self.LTM[2]) >= self.memory_threshold:
             # print("state default step: ", state)
+            self.SEC_active = True
             action, action_probs = self.action_selection(state)
         else:
             action = np.random.choice(a=self.action_space)
@@ -131,7 +134,6 @@ class SECagent(object):
         return action, action_probs
 
     def fixed_step(self, state):
-        self.total_steps += 1
         # For Atari games: Chose CL action after a minimum number of exploration steps have been taken
         action, action_probs = self.action_selection(state)
         if self.total_steps < self.exploration_steps:
@@ -189,11 +191,11 @@ class SECagent(object):
             # Collector values must be above both thresholds (absolute and relative) to contribute to action.
             self.selected_actions_indx = (collectors > self.coll_thres_act) & ((collectors / collectors.max()) > self.coll_thres_prop)  # proportional to sequence's length, n = LTM sequences
             # print ("selected_actions_indx ", self.selected_actions_indx)
-            self.save_activated_memories()
+            #self.save_activated_memories()
 
             if np.any(self.selected_actions_indx):
                 #states = np.array(self.LTM[0])[self.selected_actions_indx]
-                self.save_retrieved_states()
+                #self.save_retrieved_states()
 
                 actions = np.array(self.LTM[1])[self.selected_actions_indx]
                 # choose (normalized, or relative) rewards of sequences with actions selected
@@ -454,19 +456,31 @@ class SECagent(object):
             self.last_actions_indx.append(np.zeros(self.stm_length, dtype='bool').tolist())
 
     def save_activated_memories(self):
-        bool_array = np.array(self.selected_actions_indx)
+        bool_array = np.array(np.array(self.selected_actions_indx))
         int_array = bool_array.astype(int)
         with open(self.activated_memories_path, 'a', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow([int_array])
+            row = [self.total_steps] + [int_array.tolist()]
+            writer.writerow(row)
+            #writer.writerow([int_array])
 
     def save_retrieved_states(self):
-        retrieved_states = np.array(self.LTM[0])[self.selected_actions_indx]
-        unique_retrieved_states = np.unique(retrieved_states, axis=0)
+        # Retrieve the unique states based on the selected action indices
+        if self.SEC_active:
+            #print('np.array(self.LTM[0]) type: ', type(np.array(self.LTM[0])))
+            #print('self.selected_actions_indx type: ', type(self.selected_actions_indx))
+            #print('LTM[0]: ', np.array(self.LTM[0]))
+            #print('self.selected_actions_indx: ', self.selected_actions_indx)
+            retrieved_states = np.array(self.LTM[0])[np.array(self.selected_actions_indx)]
+            unique_retrieved_states = np.unique(retrieved_states, axis=0)
+        else:
+            unique_retrieved_states = np.array([])
 
         with open(self.retrieved_states_path, 'a', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow([unique_retrieved_states.tolist()])
+            row = [self.total_steps] + [unique_retrieved_states.tolist()]
+            writer.writerow(row)
+            #writer.writerow([self.unique_retrieved_states.tolist()])
 
     def compute_q_table(self):
         # Step 1: Retrieve all unique states experienced from LTM
@@ -520,7 +534,7 @@ class SECagent(object):
             self._events = pd.concat([self._events, pd.DataFrame(event)])
 
         # Save the events DataFrame to a CSV file
-        self.dump_agent()
+        #self.dump_agent()
         # self._events.to_csv('SEC_agent_events.csv', index=False)
 
     def dump_agent(self, **kwargs) -> None:
