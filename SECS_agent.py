@@ -72,6 +72,21 @@ class SECagent(object):
         self.max_q_values = {}
         self._events = None  # Initialize events DataFrame for saving
 
+        # Initialize file paths for saving activated memories and retrieved states
+        self.activated_memories_path = 'savedata/activated_memories.csv'
+        self.retrieved_states_path = 'savedata/retrieved_states.csv'
+
+        # Check and create CSV files with headers if they do not exist
+        if not os.path.exists(self.activated_memories_path):
+            with open(self.activated_memories_path, 'w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(['Activated Memories'])
+
+        if not os.path.exists(self.retrieved_states_path):
+            with open(self.retrieved_states_path, 'w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(['Retrieved States'])
+
         if load_ltm: self.load_LTM()
 
     def choose_action(self, state):
@@ -94,10 +109,10 @@ class SECagent(object):
         # self.update_STM(sa_couplet = [state, action])
         # self.update_sequential_bias()
 
-        action_idx = [idx == action for idx in range(4)]
-        proba = np.ones(4) * (1 - q) / 3
-        proba[action_idx] = q
-        return action, proba  # TODO we need the proba of this action, not its Q-value?
+        #action_idx = [idx == action for idx in range(4)]
+        #proba = np.ones(4) * (1 - q) / 3
+        #proba[action_idx] = q
+        return action, action_probs
 
     def update_epsilon(self):
         if self.epsilon > 0.05:  # R
@@ -172,11 +187,14 @@ class SECagent(object):
             # print ("collectors ", collectors) # proportional to sequence's length, n = LTM sequences
 
             # Collector values must be above both thresholds (absolute and relative) to contribute to action.
-            self.selected_actions_indx = (collectors > self.coll_thres_act) & ((
-                                                                                           collectors / collectors.max()) > self.coll_thres_prop)  # proportional to sequence's length, n = LTM sequences
+            self.selected_actions_indx = (collectors > self.coll_thres_act) & ((collectors / collectors.max()) > self.coll_thres_prop)  # proportional to sequence's length, n = LTM sequences
             # print ("selected_actions_indx ", self.selected_actions_indx)
+            self.save_activated_memories()
 
             if np.any(self.selected_actions_indx):
+                #states = np.array(self.LTM[0])[self.selected_actions_indx]
+                self.save_retrieved_states()
+
                 actions = np.array(self.LTM[1])[self.selected_actions_indx]
                 # choose (normalized, or relative) rewards of sequences with actions selected
                 rewards = np.array(self.LTM[2])[(np.nonzero(self.selected_actions_indx)[0])]
@@ -230,8 +248,8 @@ class SECagent(object):
 
         ### TO TEST CHANGE RELATIVE REWARD FOR SOFTMAX FOR ENVS WITH NEGATIVE REWARDS
         # action_probs = np.softmax(q)
-        # action_probs = np.exp(q - np.max(q)) / np.exp(q - np.max(m)).sum()  -- sofmax function corrected for large numbers
-        # action_probs = np.exp(q) / np.exp(q).sum()  -- sofmax function unstable for large numbers
+        #action_probs = np.exp(q - np.max(q)) / np.exp(q - np.max(m)).sum()  -- sofmax function corrected for large numbers
+        #action_probs = np.exp(q) / np.exp(q).sum()  -- sofmax function unstable for large numbers
 
         action_probs = action_probs.flatten()
 
@@ -358,7 +376,7 @@ class SECagent(object):
         # Update LTM if reached goal state and still have free space in LTM.
         if (reward_float > 0) and (len(self.LTM[2]) < self.ltm_length):
             # print('REWARD: ', reward_float)
-            print("GOAL STATE REACHED! REWARD: ", reward_float)
+            #print("GOAL STATE REACHED! REWARD: ", reward_float)
             self.LTM[0].append([s[0] for s in self.STM])  # append prototypes of STM couplets.
             self.LTM[1].append([a[1] for a in self.STM])  # append actions of STM couplets.
             self.LTM[2].append(reward_float)
@@ -434,6 +452,21 @@ class SECagent(object):
             self.tr.append(np.ones(self.stm_length).tolist())
             self.selected_actions_indx.append(np.zeros(self.stm_length, dtype='bool').tolist())
             self.last_actions_indx.append(np.zeros(self.stm_length, dtype='bool').tolist())
+
+    def save_activated_memories(self):
+        bool_array = np.array(self.selected_actions_indx)
+        int_array = bool_array.astype(int)
+        with open(self.activated_memories_path, 'a', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow([int_array])
+
+    def save_retrieved_states(self):
+        retrieved_states = np.array(self.LTM[0])[self.selected_actions_indx]
+        unique_retrieved_states = np.unique(retrieved_states, axis=0)
+
+        with open(self.retrieved_states_path, 'a', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow([unique_retrieved_states.tolist()])
 
     def compute_q_table(self):
         # Step 1: Retrieve all unique states experienced from LTM

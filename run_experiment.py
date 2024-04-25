@@ -64,11 +64,11 @@ def spatial_navigation() -> None:
     # Let's start by defining the SEC agent's parameters
     SEC_params = dict()
     SEC_params['action_space'] = len(env_params['actions'])
-    # 
+    #
     # # About the agent
     SEC_params['emb'] = 2
     SEC_params['stm'] = 15  # default: 50, test: 10
-    SEC_params['ltm'] = 250  # default: 50K, test: 10K
+    SEC_params['ltm'] = 50  # default: 50K, test: 10K
 
     SEC_params['sequential_bias'] = True
     SEC_params[
