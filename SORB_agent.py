@@ -733,7 +733,7 @@ class RLagent:
 
         # Let's make the decision:
         Q_poss = self._C[s, :, 0]
-        q_poss = np.exp(self._beta * Q_poss) / np.sum(np.exp(self._beta * Q_poss))
+        q_poss = np.exp(self._beta * Q_poss / self._maxval[0]) / np.sum(np.exp(self._beta * Q_poss / self._maxval[0]))
         # 1) if epsilon greedy, and we explore
         if self._decision_rule == "epsilon":
             # Simplest case, we choose randomly

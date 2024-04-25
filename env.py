@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import math
 import seaborn as sns
 import re
+import string
 
 import SORB_agent
 
@@ -641,6 +642,7 @@ class PlotterEnv(Env):
             self._cumul_rew = pd.DataFrame(columns=params)
             self._win_begin = kwargs.get('win_begin', 0)
             self._win_end = kwargs.get('win_end', None)
+        self._SEC_memories = None
 
         # The environment itself
         path = kwargs.get('path', None)
@@ -777,6 +779,40 @@ class PlotterEnv(Env):
         curr_image[x, y] = max_val + 2
         return curr_image
 
+    def __SEC_reactivation_to_img__(self, it: int):
+        #1) activated memories
+        full_mem = self._SEC_memories['activated_memories'].iloc[-1].split(']')
+        full_mem_elements = full_mem[0].split(',')
+        activated_memories = np.empty((len(full_mem)-2, len(full_mem_elements)))
+        activated_memories[:] = np.nan
+        if len(self._SEC_memories['activated_memories'].iloc[it]) > 0:
+            curr_mem = self._SEC_memories['activated_memories'].iloc[it].split(']')
+            for mem_idx in range(len(curr_mem)-2):
+                brackets = re.search("(?s:.*)\[", curr_mem[mem_idx])
+                if brackets is not None:
+                    curr_mem[mem_idx] = curr_mem[mem_idx][brackets.end():]
+                curr_mem_elements = curr_mem[mem_idx].split(',')
+                for state_idx in range(len(curr_mem_elements)):
+                    if int(curr_mem_elements[state_idx][-1]) == 1:
+                        activated_memories[mem_idx, state_idx] = 1
+                    else:
+                        activated_memories[mem_idx, state_idx] = 0
+
+
+        # 2) retrieved states
+        retrieved_states = np.empty(self._maze.shape)
+        retrieved_states[:] = np.nan
+        if len(self._SEC_memories['retrieved_states'].iloc[it]) > 0:
+            states_str = self._SEC_memories['retrieved_states'].iloc[it].split(']')
+            for state_idx in range(len(states_str)-2):
+                brackets = re.search("(?s:.*)\[", states_str[state_idx])
+                comma = re.search("(?s:.*),", states_str[state_idx])
+                x, y = int(states_str[state_idx][brackets.end():comma.end()-1]), int(states_str[state_idx][comma.end():])
+                retrieved_states[x, y] = 1
+
+        return activated_memories, retrieved_states
+
+
     # Function to handle the data
     def load_events(self, file_name: str, batch: str, **kwargs):
         """
@@ -785,6 +821,8 @@ class PlotterEnv(Env):
         :param batch: what batch the current file belongs to [str]
         :param kwargs:
             path: path to the file. If nothing is specified we'll be looking in the working folder
+            memories_name: name of the files containing reactivated SEC memories
+            states_name: name of the file containing sec retrieved states
         :return:
         """
         path = kwargs.get('path', None)
@@ -801,6 +839,24 @@ class PlotterEnv(Env):
         else:
             raise FileNotFoundError(f'No file named {file_name}')
 
+        if batch == 'SEC':
+            memories_name = kwargs.get('memories_name', None)
+            states_name = kwargs.get('states_name', None)
+            if os.path.isfile(f'{path}{memories_name}') and os.path.isfile(f'{path}{states_name}'):
+                SEC_memories = pd.read_csv(f'{path}{memories_name}')
+                SEC_states = pd.read_csv(f'{path}{states_name}')
+                SEC_memories = pd.merge(SEC_memories, SEC_states, how='inner', left_on="iter", right_on="iter")
+                self._SEC_memories = pd.DataFrame([[it, [], []]
+                                                   for it in range(self._events['iter'].iloc[-1] -
+                                                                   SEC_memories['iter'].iloc[-1] + 1)],
+                                                  columns=SEC_memories.columns)
+                SEC_memories['iter'] += self._events['iter'].iloc[-1] - SEC_memories['iter'].iloc[-1]
+                self._SEC_memories = pd.concat((self._SEC_memories, SEC_memories), ignore_index=True)
+
+            elif memories_name is not None:
+                raise FileNotFoundError(f'No file named {memories_name}')
+            elif states_name is not None:
+                raise FileNotFoundError(f'No file named {states_name}')
         return
 
     # Plotters
@@ -857,6 +913,14 @@ class PlotterEnv(Env):
                              ax_rla[3].imshow(curr_replay)])
         axim_rla[3].autoscale()
 
+        fig_sec, ax_sec = plt.subplots(nrows=1, ncols=2, figsize=(10, 4))
+        ax_sec[0].set_title("LTM")
+        ax_sec[1].set_title("Retrieved states")
+        [activated_memories, retrieved_states] = self.__SEC_reactivation_to_img__(0)
+        axim_sec = np.array([ax_sec[0].imshow(activated_memories, vmin=0, vmax = 1),
+                             ax_sec[1].imshow(retrieved_states, vmin=0, vmax=1)])
+
+
         txt = np.empty((*self._maze.shape, 5), dtype=matplotlib.text.Text)  # txt will appear for the Q and the H values
         for idx_x in range(txt.shape[0]):
             for idx_y in range(txt.shape[1]):
@@ -876,7 +940,7 @@ class PlotterEnv(Env):
         # 2) Looping through the memories
         SEQ_idx = 0
         overwrite_SEQ = False
-        for row_idx in range(1, self._agent_events['SORB'].shape[0]):
+        for row_idx in range(1258, self._agent_events['SORB'].shape[0]):
             it = int(self._agent_events['SORB']['iter'].iloc[row_idx])
             step = int(self._agent_events['SORB']['step'].iloc[row_idx])
 
@@ -952,7 +1016,12 @@ class PlotterEnv(Env):
             axim_rla[2].set_clim(vmax=max_vals[3])
             axim_rla[3].autoscale()
 
+            [activated_memories, retrieved_states] = self.__SEC_reactivation_to_img__(it)
+            axim_sec[0].set_data(activated_memories)
+            axim_sec[1].set_data(retrieved_states)
+
             # 2.e) Stop
             fig_env.canvas.flush_events()
             fig_rla.canvas.flush_events()
             # plt.pause(.001)
+

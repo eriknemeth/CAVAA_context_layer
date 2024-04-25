@@ -16,7 +16,8 @@ def experiment_plotter(path: str, env_file: str, SORB_file: str, SECS_file: str)
     """
     dTm = PlotterEnv(env_file, path=path)
     dTm.load_events(SORB_file, 'SORB', path=path)
-    dTm.load_events(SECS_file, 'SEC', path=path)
+    dTm.load_events(SECS_file, 'SEC', path=path,
+                    memories_name='activated_memories.csv', states_name='retrieved_states.csv')
     dTm.plot_events()
 
 
